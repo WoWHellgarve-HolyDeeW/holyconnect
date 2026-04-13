@@ -6,11 +6,13 @@
     Detects Pi, installs RNDIS driver if needed, configures networking,
     shares internet via NAT, and opens the Pi-Star dashboard.
 
-    Works on any Windows 10/11 PC. Run as Administrator.
+    Designed for Windows 10/11 PCs. Run as Administrator.
 .PARAMETER NoNAT
     Skip internet sharing (Pi-Star works but can't reach reflectors)
 .PARAMETER NoBrowser
     Don't open browser at the end
+.PARAMETER InternetAdapterName
+    Optional adapter name override for unusual Windows networking setups
 .PARAMETER Lang
     Language: 'pt' for Portuguese, 'en' for English (auto-detected from system)
 .LINK
@@ -20,12 +22,16 @@
 param(
     [switch]$NoNAT,
     [switch]$NoBrowser,
+    [string]$InternetAdapterName,
     [ValidateSet('pt','en')][string]$Lang
 )
 
 $ErrorActionPreference = "Continue"
 $Host.UI.RawUI.WindowTitle = "HolyConnect"
 $HOLYCONNECT_VERSION = "1.0.1"
+$HOLYCONNECT_HOST_IP = "192.168.7.1"
+$HOLYCONNECT_PI_IP = "192.168.7.2"
+$HOLYCONNECT_NAT_PREFIX = "192.168.7.0/24"
 $PING = Join-Path $env:SystemRoot "System32\ping.exe"
 $PNPUTIL = Join-Path $env:SystemRoot "System32\pnputil.exe"
 $DEVMGMT = Join-Path $env:SystemRoot "System32\devmgmt.msc"
@@ -85,8 +91,12 @@ if ($Lang -eq 'pt') {
     $T.InternetVia       = "Internet via"
     $T.NATActive         = "NAT ativado - Pi tera internet"
     $T.NATExists         = "NAT ja estava ativo"
-    $T.NATFailed         = "NAT falhou"
-    $T.NATFailHint       = "O Pi-Star funciona mas pode nao ter internet."
+    $T.NATUnavailable    = "Os cmdlets NetNat nao estao disponiveis neste Windows."
+    $T.NATUnavailableHint= "O Pi-Star continua acessivel por USB, mas sem partilha de internet automatica."
+    $T.NATReuseExisting  = "A reutilizar NAT existente: {0}"
+    $T.NATConflict       = "Nao foi possivel criar NAT seguro"
+    $T.NATConflictHint   = "O HolyConnect nao alterou outras regras NAT. O Pi-Star fica acessivel por USB; para internet, liberta a subnet 192.168.7.0/24 ou usa -NoNAT."
+    $T.AdapterOverrideFailed = "Adaptador pedido nao encontrado ou sem rota default: {0}"
     $T.Step5             = "A procurar Pi-Star na rede..."
     $T.Attempt           = "Tentativa"
     $T.Step6             = "Resultado final"
@@ -149,8 +159,12 @@ if ($Lang -eq 'pt') {
     $T.InternetVia       = "Internet via"
     $T.NATActive         = "NAT active - Pi will have internet"
     $T.NATExists         = "NAT was already active"
-    $T.NATFailed         = "NAT failed"
-    $T.NATFailHint       = "Pi-Star works but may not have internet."
+    $T.NATUnavailable    = "NetNat cmdlets are not available on this Windows version."
+    $T.NATUnavailableHint= "Pi-Star will still work over USB, but automatic internet sharing is skipped."
+    $T.NATReuseExisting  = "Reusing existing NAT: {0}"
+    $T.NATConflict       = "Could not create a safe NAT rule"
+    $T.NATConflictHint   = "HolyConnect did not change other NAT rules. Pi-Star stays reachable over USB; for internet, free subnet 192.168.7.0/24 or use -NoNAT."
+    $T.AdapterOverrideFailed = "Requested adapter not found or has no default route: {0}"
     $T.Step5             = "Searching for Pi-Star on network..."
     $T.Attempt           = "Attempt"
     $T.Step6             = "Final result"
@@ -200,7 +214,7 @@ function Find-PiStar {
     }
 
     # Standard candidates
-    if ("192.168.7.2" -notin $candidates) { $candidates.Add("192.168.7.2") }
+    if ($HOLYCONNECT_PI_IP -notin $candidates) { $candidates.Add($HOLYCONNECT_PI_IP) }
     $candidates.Add("192.168.137.2")
 
     $rndis = Get-NetAdapter | Where-Object { $_.InterfaceDescription -match 'RNDIS|Remote NDIS' -and $_.Status -eq 'Up' }
@@ -236,18 +250,79 @@ function Get-RNDISAdapter {
     Get-NetAdapter | Where-Object { $_.InterfaceDescription -match 'RNDIS|Remote NDIS' } | Select-Object -First 1
 }
 
+function Get-AvailableNatName {
+    $preferredNames = @("HolyConnectNAT", "HolyConnectNAT-$($env:COMPUTERNAME)", "PiStarNAT")
+    foreach ($name in $preferredNames) {
+        if (-not (Get-NetNat -Name $name -ErrorAction SilentlyContinue)) { return $name }
+    }
+    return "HolyConnectNAT-$([Guid]::NewGuid().ToString('N').Substring(0, 6))"
+}
+
+function Get-SubnetNat {
+    param([string]$Prefix)
+
+    Get-NetNat -ErrorAction SilentlyContinue |
+        Where-Object { $_.InternalIPInterfaceAddressPrefix -eq $Prefix } |
+        Select-Object -First 1
+}
+
 function Get-InternetAdapter {
-    # Find the real internet adapter, excluding virtual/VPN adapters
-    Get-NetAdapter | Where-Object {
-        $_.Status -eq 'Up' -and
-        $_.InterfaceDescription -notmatch 'RNDIS|Remote NDIS' -and
-        $_.InterfaceDescription -notmatch 'Hyper-V|vEthernet|VirtualBox|VMware|TAP-Windows|WireGuard|Fortinet|Cisco AnyConnect' -and
-        $_.Name -notmatch 'Loopback|vEthernet'
-    } | ForEach-Object {
-        $gw = Get-NetRoute -InterfaceIndex $_.ifIndex -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue
-        if ($gw) { $_ }
-    } | Sort-Object -Property { (Get-NetRoute -InterfaceIndex $_.ifIndex -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue).RouteMetric } |
-    Select-Object -First 1
+    param([string]$PreferredName)
+
+    $routesByIfIndex = @{}
+    Get-NetRoute -DestinationPrefix "0.0.0.0/0" -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+        Where-Object { $_.NextHop -and $_.NextHop -ne '0.0.0.0' } |
+        ForEach-Object {
+            $current = $routesByIfIndex[$_.ifIndex]
+            if (-not $current -or $_.RouteMetric -lt $current.RouteMetric) {
+                $routesByIfIndex[$_.ifIndex] = $_
+            }
+        }
+
+    if ($PreferredName) {
+        $preferred = Get-NetAdapter -Name $PreferredName -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $preferred -or $preferred.Status -ne 'Up') { return $null }
+        $preferredRoute = $routesByIfIndex[$preferred.ifIndex]
+        if (-not $preferredRoute) { return $null }
+
+        return [pscustomobject]@{
+            Adapter = $preferred
+            Route = $preferredRoute
+            Source = 'preferred'
+            Score = 1000
+        }
+    }
+
+    $candidates = foreach ($route in $routesByIfIndex.Values) {
+        $adapter = Get-NetAdapter -InterfaceIndex $route.ifIndex -ErrorAction SilentlyContinue
+        if (-not $adapter -or $adapter.Status -ne 'Up') { continue }
+        if ($adapter.InterfaceDescription -match 'RNDIS|Remote NDIS' -or $adapter.Name -match 'Loopback') { continue }
+
+        $adapterText = "$($adapter.Name) $($adapter.InterfaceDescription)"
+        $ipv4 = Get-NetIPAddress -InterfaceIndex $adapter.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+            Where-Object { $_.IPAddress -notmatch '^169\.254\.' } |
+            Select-Object -First 1
+
+        $score = 0
+        if ($adapter.HardwareInterface) { $score += 40 } else { $score += 5 }
+        if ($ipv4) { $score += 25 }
+        if ($adapterText -match 'Ethernet|Wi-?Fi|Wireless|WLAN|WWAN|Mobile|LTE|5G|4G|USB') { $score += 20 }
+        if ($adapterText -match 'Bluetooth') { $score -= 20 }
+        if ($adapterText -match 'Hyper-V|vEthernet|VMware|VirtualBox|Loopback') { $score -= 25 }
+        if ($adapterText -match 'VPN|WireGuard|AnyConnect|Fortinet|Tailscale|ZeroTier|TAP-Windows|Juniper|Zscaler') { $score -= 10 }
+        $score -= [Math]::Min([int]$route.RouteMetric, 50)
+
+        [pscustomobject]@{
+            Adapter = $adapter
+            Route = $route
+            Source = 'auto'
+            Score = $score
+        }
+    }
+
+    $candidates |
+        Sort-Object @{ Expression = 'Score'; Descending = $true }, @{ Expression = { [int]$_.Route.RouteMetric }; Descending = $false } |
+        Select-Object -First 1
 }
 
 # ============================================
@@ -429,12 +504,12 @@ $rndis | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
 Start-Sleep 2
 
 try {
-    New-NetIPAddress -InterfaceIndex $rndis.ifIndex -IPAddress "192.168.7.1" -PrefixLength 24 -ErrorAction Stop | Out-Null
-    Write-OK "$($T.IPSet): 192.168.7.1/24"
+    New-NetIPAddress -InterfaceIndex $rndis.ifIndex -IPAddress $HOLYCONNECT_HOST_IP -PrefixLength 24 -ErrorAction Stop | Out-Null
+    Write-OK "$($T.IPSet): $HOLYCONNECT_HOST_IP/24"
 } catch {
     $existing = Get-NetIPAddress -InterfaceIndex $rndis.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue
-    if ($existing -and $existing.IPAddress -eq "192.168.7.1") {
-        Write-OK "$($T.IPSet): 192.168.7.1/24"
+    if ($existing -and $existing.IPAddress -eq $HOLYCONNECT_HOST_IP) {
+        Write-OK "$($T.IPSet): $HOLYCONNECT_HOST_IP/24"
     } elseif ($existing) {
         Write-OK "$($T.IPCurrent): $($existing.IPAddress)/$($existing.PrefixLength)"
     } else {
@@ -452,49 +527,61 @@ if ($piIP) { Write-OK ($T.PiReachable -f $piIP) }
 Write-Step 4 $steps $T.Step4
 
 $natActive = $false
-$internetAdapter = Get-InternetAdapter
+$internetAdapter = $null
+$internetSelection = $null
 
 if ($NoNAT) {
     Write-Info $T.NATDisabled
-} elseif (-not $internetAdapter) {
-    Write-Warn $T.NoInternet
-    Write-Info $T.NoInternetHint
 } else {
-    Write-Info "$($T.InternetVia): $($internetAdapter.Name)"
-    try {
-        # Remove any existing NAT for our subnet (handles old names like PiStarNAT too)
-        Get-NetNat -ErrorAction SilentlyContinue | Where-Object {
-            $_.Name -match 'HolyConnect|PiStar' -or $_.InternalIPInterfaceAddressPrefix -eq '192.168.7.0/24'
-        } | Remove-NetNat -Confirm:$false -ErrorAction SilentlyContinue
-
-        New-NetNat -Name "HolyConnectNAT" -InternalIPInterfaceAddressPrefix "192.168.7.0/24" -ErrorAction Stop | Out-Null
-        $natActive = $true
-        Write-OK $T.NATActive
-    } catch {
-        if ($_.Exception.Message -match "already exists|overlaps|duplica") {
-            # Try to use the existing one
-            $existingNat = Get-NetNat -ErrorAction SilentlyContinue | Where-Object {
-                $_.InternalIPInterfaceAddressPrefix -eq '192.168.7.0/24'
+    if (-not (Get-Command New-NetNat -ErrorAction SilentlyContinue)) {
+        Write-Warn $T.NATUnavailable
+        Write-Info $T.NATUnavailableHint
+    } else {
+        if ($InternetAdapterName) {
+            $internetSelection = Get-InternetAdapter -PreferredName $InternetAdapterName
+            if (-not $internetSelection) {
+                Write-Warn ($T.AdapterOverrideFailed -f $InternetAdapterName)
             }
+        }
+
+        if (-not $internetSelection) {
+            $internetSelection = Get-InternetAdapter
+        }
+
+        $internetAdapter = if ($internetSelection) { $internetSelection.Adapter } else { $null }
+
+        if (-not $internetAdapter) {
+            Write-Warn $T.NoInternet
+            Write-Info $T.NoInternetHint
+        } else {
+            Write-Info "$($T.InternetVia): $($internetAdapter.Name) ($($internetAdapter.InterfaceDescription))"
+
+            $existingNat = Get-SubnetNat -Prefix $HOLYCONNECT_NAT_PREFIX
             if ($existingNat) {
                 $natActive = $true
-                Write-OK $T.NATExists
+                if ($existingNat.Name -match '^(HolyConnectNAT|PiStarNAT)') {
+                    Write-OK $T.NATExists
+                } else {
+                    Write-Info ($T.NATReuseExisting -f $existingNat.Name)
+                    Write-OK $T.NATActive
+                }
             } else {
-                # Conflict with another NAT (e.g. Hyper-V Default Switch)
-                # Remove ALL NetNat and recreate ours
                 try {
-                    Get-NetNat -ErrorAction SilentlyContinue | Remove-NetNat -Confirm:$false -ErrorAction SilentlyContinue
-                    New-NetNat -Name "HolyConnectNAT" -InternalIPInterfaceAddressPrefix "192.168.7.0/24" -ErrorAction Stop | Out-Null
+                    New-NetNat -Name (Get-AvailableNatName) -InternalIPInterfaceAddressPrefix $HOLYCONNECT_NAT_PREFIX -ErrorAction Stop | Out-Null
                     $natActive = $true
                     Write-OK $T.NATActive
                 } catch {
-                    Write-Warn "$($T.NATFailed): $($_.Exception.Message)"
-                    Write-Info $T.NATFailHint
+                    $existingNat = Get-SubnetNat -Prefix $HOLYCONNECT_NAT_PREFIX
+                    if ($existingNat) {
+                        $natActive = $true
+                        Write-Info ($T.NATReuseExisting -f $existingNat.Name)
+                        Write-OK $T.NATActive
+                    } else {
+                        Write-Warn "$($T.NATConflict): $($_.Exception.Message)"
+                        Write-Info $T.NATConflictHint
+                    }
                 }
             }
-        } else {
-            Write-Warn "$($T.NATFailed): $($_.Exception.Message)"
-            Write-Info $T.NATFailHint
         }
     }
 }
@@ -578,7 +665,7 @@ if ($piIP) {
         $sub = $adapterIP.IPAddress -replace '\.\d+$', ''
         Write-Host "    http://${sub}.2/" -ForegroundColor Cyan
     }
-    Write-Host "    http://192.168.7.2/" -ForegroundColor Cyan
+    Write-Host "    http://$HOLYCONNECT_PI_IP/" -ForegroundColor Cyan
 }
 
 Write-Host ""

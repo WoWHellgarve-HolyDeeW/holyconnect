@@ -18,7 +18,7 @@
 #
 #  COMPATIBLE WITH:
 #    - Pi-Star 4.x on Raspberry Pi Zero W / Zero 2 W
-#    - Any Raspbian/DietPi with dwc2 OTG support
+#    - Raspberry Pi OS style systems using /boot, systemd, dhcpcd and dwc2 OTG
 ###############################################################################
 
 set +e  # Don't abort on non-critical errors
@@ -40,6 +40,26 @@ echo "Date: $(date)"
 echo "Host: $(hostname)"
 echo "Kernel: $(uname -r)"
 echo ""
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "ERROR: Run this installer as root (sudo bash /boot/install.sh)."
+    exit 1
+fi
+
+if [ ! -f /boot/cmdline.txt ] || [ ! -f /boot/config.txt ]; then
+    echo "ERROR: This installer expects a Pi-Star / Raspberry Pi OS style /boot partition."
+    exit 1
+fi
+
+if ! command -v systemctl >/dev/null 2>&1; then
+    echo "ERROR: systemctl not found. This installer requires systemd."
+    exit 1
+fi
+
+if [ ! -f /etc/dhcpcd.conf ]; then
+    echo "ERROR: /etc/dhcpcd.conf not found. This installer currently supports Pi-Star / Raspberry Pi OS style networking."
+    exit 1
+fi
 
 # Wait for boot to settle
 sleep 5

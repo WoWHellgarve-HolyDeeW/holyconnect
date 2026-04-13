@@ -2,7 +2,7 @@
 
 **USB tethering solution for Pi-Star MMDVM hotspots with dead Wi-Fi.**
 
-Connect your Raspberry Pi Zero W running Pi-Star to any Windows PC via USB cable. No Wi-Fi needed.
+Connect your Raspberry Pi Zero W running Pi-Star to a Windows 10/11 PC or laptop via USB cable. No Wi-Fi needed.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -19,7 +19,7 @@ HolyConnect turns the Pi Zero W's USB port into a virtual network adapter using 
 - **Windows auto-detects it** as a network adapter (no manual driver install on most PCs)
 - **Stable 192.168.7.x link** between Pi and PC
 - **Internet sharing via NAT** — Pi-Star can reach DMR/YSF/D-Star reflectors through the PC's internet
-- **Works on any Windows 10/11 PC** — just copy 2 files and double-click
+- **Designed for most Windows 10/11 PCs and laptops** — just copy 2 files and double-click
 
 ## How It Works
 
@@ -78,23 +78,26 @@ holyconnect/
 |---------|---------|
 | **Auto-detect** | Waits for Pi, scans multiple IPs, checks ARP table |
 | **Auto-driver** | Tries `pnputil` + device restart before asking for manual install |
-| **NAT internet** | Shares PC's internet with Pi via `New-NetNat` |
+| **NAT internet** | Shares PC's internet with Pi via `New-NetNat` without deleting unrelated NAT rules |
 | **Bilingual** | Auto-detects system language (English / Portuguese) |
 | **No dependencies** | Uses only built-in Windows tools (PowerShell 5.1+) |
 | **MS OS Descriptors** | Windows recognizes Pi as RNDIS device automatically |
 | **DHCP fallback** | Pi tries DHCP first, falls back to static 192.168.7.2 |
+| **Adapter override** | Optional `-InternetAdapterName` for unusual VPN / corporate / VM-heavy PCs |
 
 ## Compatibility
 
 ### Pi-side
 - Raspberry Pi Zero W, Zero 2 W (any board with USB OTG)
 - Pi-Star 4.x (tested with 4.2.3)
-- Any Raspbian-based OS with `dwc2` support
+- Raspberry Pi OS style systems that use `/boot`, `systemd`, `dhcpcd`, and `dwc2`
 
 ### Windows-side
 - Windows 10 (1703+) and Windows 11
 - PowerShell 5.1+ (built-in)
-- No admin tools or third-party software needed
+- Administrator rights required
+- No third-party software needed
+- On PCs with Hyper-V, WSL, Docker or VPN software, HolyConnect reuses an existing `192.168.7.0/24` NAT or stays local-only instead of changing other Windows NAT rules
 
 ### MMDVM Boards Tested
 - PIMMDVM01 (AliExpress)
@@ -114,6 +117,12 @@ A: It only adds a USB gadget service and network config. Pi-Star itself is untou
 
 **Q: First time on a new PC — do I need to install drivers manually?**
 A: Usually no. The MS OS Descriptors make Windows auto-detect it. On older Windows versions, the script guides you through a one-time manual driver install (~30 seconds).
+
+**Q: Will this mess with Hyper-V, Docker, WSL or VPN networking?**
+A: Current versions do not delete other Windows NAT rules. If `192.168.7.0/24` is already claimed, HolyConnect reuses that NAT when possible or keeps USB access local-only.
+
+**Q: What if auto-detect picks the wrong internet adapter on a weird PC?**
+A: Most PCs are fully automatic. For edge cases, run `HolyConnect.ps1 -InternetAdapterName "Adapter Name"` once from an elevated PowerShell window.
 
 **Q: Can I use Wi-Fi dongle AND USB tethering?**
 A: The Pi Zero W has only one USB port. You can use either a USB cable (HolyConnect) or a Wi-Fi dongle, not both simultaneously (unless you add a USB hub with OTG adapter).
