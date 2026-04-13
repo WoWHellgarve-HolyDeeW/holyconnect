@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    HolyConnect v1.0.1 - Pi-Star USB Tethering for Windows
+    HolyConnect v1.0.2 - Pi-Star USB Tethering for Windows
 .DESCRIPTION
     Automatically connects to a Pi-Star MMDVM hotspot via USB cable.
     Detects Pi, installs RNDIS driver if needed, configures networking,
@@ -28,7 +28,7 @@ param(
 
 $ErrorActionPreference = "Continue"
 $Host.UI.RawUI.WindowTitle = "HolyConnect"
-$HOLYCONNECT_VERSION = "1.0.1"
+$HOLYCONNECT_VERSION = "1.0.2"
 $HOLYCONNECT_HOST_IP = "192.168.7.1"
 $HOLYCONNECT_PI_IP = "192.168.7.2"
 $HOLYCONNECT_NAT_PREFIX = "192.168.7.0/24"
