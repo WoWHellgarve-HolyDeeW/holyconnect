@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    HolyConnect v1.0.2 - Pi-Star USB Tethering for Windows
+    HolyConnect v1.0.3 - Pi-Star USB Tethering for Windows
 .DESCRIPTION
     Automatically connects to a Pi-Star MMDVM hotspot via USB cable.
     Detects Pi, installs RNDIS driver if needed, configures networking,
@@ -13,6 +13,8 @@
     Don't open browser at the end
 .PARAMETER InternetAdapterName
     Optional adapter name override for unusual Windows networking setups
+.PARAMETER LogPath
+    Optional log file path. Defaults to windows\logs with local fallbacks
 .PARAMETER Lang
     Language: 'pt' for Portuguese, 'en' for English (auto-detected from system)
 .LINK
@@ -23,12 +25,13 @@ param(
     [switch]$NoNAT,
     [switch]$NoBrowser,
     [string]$InternetAdapterName,
+    [string]$LogPath,
     [ValidateSet('pt','en')][string]$Lang
 )
 
 $ErrorActionPreference = "Continue"
 $Host.UI.RawUI.WindowTitle = "HolyConnect"
-$HOLYCONNECT_VERSION = "1.0.2"
+$HOLYCONNECT_VERSION = "1.0.3"
 $HOLYCONNECT_HOST_IP = "192.168.7.1"
 $HOLYCONNECT_PI_IP = "192.168.7.2"
 $HOLYCONNECT_NAT_PREFIX = "192.168.7.0/24"
@@ -48,6 +51,8 @@ $T = @{}
 if ($Lang -eq 'pt') {
     $T.AdminRequired     = "PRECISA CORRER COMO ADMINISTRADOR!"
     $T.AdminHint         = "Clica direito -> 'Executar como Administrador'"
+    $T.LogEnabled        = "Logs guardados em {0}"
+    $T.LogLabel          = "Log"
     $T.Step1             = "A procurar dispositivo Pi USB..."
     $T.PlugIn            = "Liga o Pi ao PC pelo cabo USB (porta DATA, nao PWR)"
     $T.BootWait          = "O Pi demora ~60-90 seg a arrancar..."
@@ -60,6 +65,7 @@ if ($Lang -eq 'pt') {
     $T.DriverOK          = "Driver OK"
     $T.DriverNotFound    = "O Windows nao reconheceu como placa de rede."
     $T.DriverAutoInstall = "A tentar instalar driver automaticamente..."
+    $T.DriverInfMissing  = "Nenhum driver RNDIS built-in foi encontrado neste Windows."
     $T.DriverRestarting  = "A reiniciar dispositivo para forcar detecao..."
     $T.DriverManualTitle = "INSTALACAO MANUAL DO DRIVER (so precisa 1 vez)"
     $T.DriverManualOpen  = "O Gestor de Dispositivos vai abrir agora."
@@ -116,6 +122,8 @@ if ($Lang -eq 'pt') {
 } else {
     $T.AdminRequired     = "MUST RUN AS ADMINISTRATOR!"
     $T.AdminHint         = "Right-click -> 'Run as Administrator'"
+    $T.LogEnabled        = "Logs saved to {0}"
+    $T.LogLabel          = "Log"
     $T.Step1             = "Searching for Pi USB device..."
     $T.PlugIn            = "Connect Pi to PC via USB cable (DATA port, not PWR)"
     $T.BootWait          = "Pi takes ~60-90 sec to boot..."
@@ -128,6 +136,7 @@ if ($Lang -eq 'pt') {
     $T.DriverOK          = "Driver OK"
     $T.DriverNotFound    = "Windows didn't recognize it as a network adapter."
     $T.DriverAutoInstall = "Trying to install driver automatically..."
+    $T.DriverInfMissing  = "No built-in RNDIS driver INF was found on this Windows install."
     $T.DriverRestarting  = "Restarting device to force detection..."
     $T.DriverManualTitle = "MANUAL DRIVER INSTALL (only needed once)"
     $T.DriverManualOpen  = "Device Manager will open now."
@@ -186,11 +195,152 @@ if ($Lang -eq 'pt') {
 # ============================================
 #  HELPERS
 # ============================================
-function Write-Step($n, $t, $msg) { Write-Host "`n[$n/$t] $msg" -ForegroundColor Yellow }
-function Write-OK($msg)   { Write-Host "  [OK] $msg" -ForegroundColor Green }
-function Write-Info($msg)  { Write-Host "  $msg" -ForegroundColor Gray }
-function Write-Warn($msg)  { Write-Host "  [!] $msg" -ForegroundColor DarkYellow }
-function Write-Fail($msg)  { Write-Host "  [X] $msg" -ForegroundColor Red }
+$script:LogPath = $null
+
+function Initialize-Log {
+    param([string]$RequestedPath)
+
+    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $defaultName = "holyconnect_${timestamp}_$($env:COMPUTERNAME).log"
+    $candidates = [System.Collections.Generic.List[string]]::new()
+
+    if ($RequestedPath) {
+        $candidates.Add($RequestedPath)
+    } else {
+        $candidates.Add((Join-Path (Join-Path $PSScriptRoot "logs") $defaultName))
+        if ($env:ProgramData) {
+            $candidates.Add((Join-Path (Join-Path $env:ProgramData "HolyConnect\logs") $defaultName))
+        }
+        if ($env:TEMP) {
+            $candidates.Add((Join-Path (Join-Path $env:TEMP "HolyConnect") $defaultName))
+        }
+    }
+
+    foreach ($candidate in $candidates) {
+        try {
+            $dir = Split-Path -Parent $candidate
+            if ($dir -and -not (Test-Path $dir)) {
+                New-Item -ItemType Directory -Path $dir -Force -ErrorAction Stop | Out-Null
+            }
+            Set-Content -Path $candidate -Value @("HolyConnect log", "") -Encoding UTF8 -ErrorAction Stop
+            $script:LogPath = $candidate
+            return $candidate
+        } catch {}
+    }
+
+    return $null
+}
+
+function Write-Log($level, $msg) {
+    if (-not $script:LogPath -or [string]::IsNullOrWhiteSpace($msg)) { return }
+
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    foreach ($line in ($msg -replace "`r", "" -split "`n")) {
+        if (-not [string]::IsNullOrWhiteSpace($line)) {
+            Add-Content -Path $script:LogPath -Value "[$timestamp] [$level] $line" -Encoding UTF8 -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Write-Step($n, $t, $msg) { Write-Log 'STEP' "[$n/$t] $msg"; Write-Host "`n[$n/$t] $msg" -ForegroundColor Yellow }
+function Write-OK($msg)   { Write-Log 'OK' $msg; Write-Host "  [OK] $msg" -ForegroundColor Green }
+function Write-Info($msg)  { Write-Log 'INFO' $msg; Write-Host "  $msg" -ForegroundColor Gray }
+function Write-Warn($msg)  { Write-Log 'WARN' $msg; Write-Host "  [!] $msg" -ForegroundColor DarkYellow }
+function Write-Fail($msg)  { Write-Log 'FAIL' $msg; Write-Host "  [X] $msg" -ForegroundColor Red }
+
+function Exit-HolyConnect {
+    param([int]$Code = 0)
+
+    if ($script:LogPath) {
+        Write-Host ""
+        Write-Host "  $($T.LogLabel): $script:LogPath" -ForegroundColor DarkGray
+        Write-Log 'INFO' "Exit code: $Code"
+    }
+
+    Write-Host ""
+    Write-Host "  $($T.PressKey)" -ForegroundColor Gray
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    exit $Code
+}
+
+function Invoke-CapturedCommand {
+    param(
+        [string]$CommandPath,
+        [string[]]$Arguments
+    )
+
+    $argText = if ($Arguments) { $Arguments -join ' ' } else { '' }
+    Write-Log 'CMD' "Running: $CommandPath $argText"
+
+    try {
+        $output = & $CommandPath @Arguments 2>&1
+        $exitCode = $LASTEXITCODE
+    } catch {
+        Write-Log 'ERROR' "$CommandPath failed: $($_.Exception.Message)"
+        return [pscustomobject]@{ Output = @(); ExitCode = -1 }
+    }
+
+    foreach ($line in @($output)) {
+        if ($null -ne $line) {
+            $text = "$line".TrimEnd()
+            if ($text) { Write-Log 'CMD' $text }
+        }
+    }
+
+    Write-Log 'CMD' "ExitCode: $exitCode"
+    return [pscustomobject]@{ Output = @($output); ExitCode = $exitCode }
+}
+
+function Write-DiagnosticSnapshot {
+    param([string]$Reason)
+
+    Write-Log 'DEBUG' "=== Diagnostic snapshot: $Reason ==="
+    Write-Log 'DEBUG' "Version=$HOLYCONNECT_VERSION; Computer=$env:COMPUTERNAME; User=$env:USERNAME; PowerShell=$($PSVersionTable.PSVersion)"
+
+    try {
+        $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+        Write-Log 'DEBUG' "OS=$($os.Caption); Version=$($os.Version); Build=$($os.BuildNumber)"
+    } catch {}
+
+    if (Get-Command Get-PnpDevice -ErrorAction SilentlyContinue) {
+        try {
+            Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
+                Where-Object { $_.InstanceId -match 'VID_0525|RNDIS' } |
+                Select-Object -First 12 |
+                ForEach-Object {
+                    Write-Log 'DEBUG' ("PnP: Status={0}; Class={1}; Name={2}; Id={3}" -f $_.Status, $_.Class, (Get-PiUsbDeviceLabel $_), $_.InstanceId)
+                }
+        } catch {}
+    }
+
+    try {
+        Get-NetAdapter -ErrorAction SilentlyContinue |
+            Sort-Object ifIndex |
+            ForEach-Object {
+                $ipv4 = Get-NetIPAddress -InterfaceIndex $_.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+                    Select-Object -ExpandProperty IPAddress
+                $ipv4Text = if ($ipv4) { $ipv4 -join ',' } else { '-' }
+                Write-Log 'DEBUG' ("Adapter: Name={0}; Status={1}; IfIndex={2}; IPv4={3}; Desc={4}" -f $_.Name, $_.Status, $_.ifIndex, $ipv4Text, $_.InterfaceDescription)
+            }
+    } catch {}
+
+    try {
+        Get-NetRoute -DestinationPrefix '0.0.0.0/0' -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+            Sort-Object RouteMetric |
+            ForEach-Object {
+                Write-Log 'DEBUG' ("Route: IfIndex={0}; Metric={1}; NextHop={2}; Prefix={3}" -f $_.ifIndex, $_.RouteMetric, $_.NextHop, $_.DestinationPrefix)
+            }
+    } catch {}
+
+    if (Get-Command Get-NetNat -ErrorAction SilentlyContinue) {
+        try {
+            Get-NetNat -ErrorAction SilentlyContinue |
+                ForEach-Object {
+                    Write-Log 'DEBUG' ("NAT: Name={0}; Prefix={1}" -f $_.Name, $_.InternalIPInterfaceAddressPrefix)
+                }
+        } catch {}
+    }
+}
 
 function Test-Port($ip, $port, $timeoutMs = 800) {
     try {
@@ -209,15 +359,18 @@ function Find-PiStar {
     # Try last known IP first (from previous run)
     $lastIPFile = Join-Path $PSScriptRoot "holyconnect_last_ip.txt"
     if (Test-Path $lastIPFile) {
-        $lastIP = (Get-Content $lastIPFile -ErrorAction SilentlyContinue | Select-Object -First 1).Trim()
-        if ($lastIP -match '^\d+\.\d+\.\d+\.\d+$') { $candidates.Add($lastIP) }
+        $lastIP = Get-Content $lastIPFile -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($lastIP) {
+            $lastIP = $lastIP.Trim()
+            if ($lastIP -match '^\d+\.\d+\.\d+\.\d+$') { $candidates.Add($lastIP) }
+        }
     }
 
     # Standard candidates
     if ($HOLYCONNECT_PI_IP -notin $candidates) { $candidates.Add($HOLYCONNECT_PI_IP) }
     $candidates.Add("192.168.137.2")
 
-    $rndis = Get-NetAdapter | Where-Object { $_.InterfaceDescription -match 'RNDIS|Remote NDIS' -and $_.Status -eq 'Up' }
+    $rndis = Get-RNDISAdapter
     if ($rndis) {
         $arpEntries = Get-NetNeighbor -InterfaceIndex $rndis.ifIndex -ErrorAction SilentlyContinue |
             Where-Object { $_.State -ne 'Unreachable' -and $_.IPAddress -match '^\d+\.\d+\.\d+\.\d+$' }
@@ -234,20 +387,47 @@ function Find-PiStar {
         }
     }
 
+    Write-Log 'DEBUG' ("Find-PiStar candidates: " + ($candidates -join ', '))
+
     foreach ($ip in $candidates) {
-        # Try ping first (fast), fall back to TCP if ping blocked by firewall
         $reachable = $false
-        $reply = & $PING -n 1 -w 600 $ip 2>$null | Select-String "Reply from"
-        if ($reply) { $reachable = $true }
-        if ($reachable -and (Test-Port $ip 22 800)) { return $ip }
-        # Firewall may block ICMP but SSH still works
-        if (-not $reachable -and (Test-Port $ip 22 1200)) { return $ip }
+        & $PING -n 1 -w 600 $ip 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) { $reachable = $true }
+
+        if ($reachable -and (Test-Port $ip 22 800)) {
+            Write-Log 'INFO' "Pi-Star found at $ip (ICMP + SSH)"
+            return $ip
+        }
+
+        if (-not $reachable -and (Test-Port $ip 22 1200)) {
+            Write-Log 'INFO' "Pi-Star found at $ip (SSH only)"
+            return $ip
+        }
     }
     return $null
 }
 
+function Get-RNDISAdapters {
+    $adapters = @(Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceDescription -match 'RNDIS|Remote NDIS' })
+    if (-not $adapters) { return @() }
+
+    $piAdapterNames = @{}
+    try {
+        Get-CimInstance Win32_NetworkAdapter -ErrorAction SilentlyContinue |
+            Where-Object { $_.NetConnectionID -and $_.PNPDeviceID -match 'VID_0525' } |
+            ForEach-Object { $piAdapterNames[$_.NetConnectionID] = $true }
+    } catch {}
+
+    $sorted = $adapters | Sort-Object @{ Expression = { $piAdapterNames.ContainsKey($_.Name) }; Descending = $true }, @{ Expression = { $_.Status -eq 'Up' }; Descending = $true }, Name
+    if ($sorted.Count -gt 1) {
+        Write-Log 'DEBUG' ("Multiple RNDIS adapters detected: " + (($sorted | ForEach-Object { $_.Name }) -join ', '))
+    }
+
+    return @($sorted)
+}
+
 function Get-RNDISAdapter {
-    Get-NetAdapter | Where-Object { $_.InterfaceDescription -match 'RNDIS|Remote NDIS' } | Select-Object -First 1
+    Get-RNDISAdapters | Select-Object -First 1
 }
 
 function Get-PiUsbDevice {
@@ -263,6 +443,26 @@ function Get-PiUsbDeviceLabel($device) {
         if ($label) { return $label }
     }
     return "Pi USB device"
+}
+
+function Get-RndisInfCandidates {
+    $candidates = [System.Collections.Generic.List[string]]::new()
+    foreach ($path in @(
+        (Join-Path $env:SystemRoot "INF\netrndis.inf"),
+        (Join-Path $env:SystemRoot "INF\rndiscmp.inf")
+    )) {
+        if ($path -and (Test-Path $path) -and ($path -notin $candidates)) {
+            $candidates.Add($path)
+        }
+    }
+
+    Get-ChildItem (Join-Path $env:SystemRoot 'INF') -Filter '*rndis*.inf' -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty FullName |
+        ForEach-Object {
+            if ($_ -notin $candidates) { $candidates.Add($_) }
+        }
+
+    return @($candidates)
 }
 
 function Get-AvailableNatName {
@@ -300,6 +500,8 @@ function Get-InternetAdapter {
         $preferredRoute = $routesByIfIndex[$preferred.ifIndex]
         if (-not $preferredRoute) { return $null }
 
+        Write-Log 'INFO' ("Using requested internet adapter: {0} ({1})" -f $preferred.Name, $preferred.InterfaceDescription)
+
         return [pscustomobject]@{
             Adapter = $preferred
             Route = $preferredRoute
@@ -335,9 +537,19 @@ function Get-InternetAdapter {
         }
     }
 
-    $candidates |
+    foreach ($candidate in $candidates) {
+        Write-Log 'DEBUG' ("Internet candidate: Name={0}; Score={1}; Metric={2}; Desc={3}" -f $candidate.Adapter.Name, $candidate.Score, $candidate.Route.RouteMetric, $candidate.Adapter.InterfaceDescription)
+    }
+
+    $selected = $candidates |
         Sort-Object @{ Expression = 'Score'; Descending = $true }, @{ Expression = { [int]$_.Route.RouteMetric }; Descending = $false } |
         Select-Object -First 1
+
+    if ($selected) {
+        Write-Log 'INFO' ("Selected internet adapter: {0} ({1}) score={2}" -f $selected.Adapter.Name, $selected.Adapter.InterfaceDescription, $selected.Score)
+    }
+
+    return $selected
 }
 
 # ============================================
@@ -355,13 +567,19 @@ Write-Host "                        v${HOLYCONNECT_VERSION}" -ForegroundColor Da
 Write-Host "  ============================================" -ForegroundColor Cyan
 Write-Host ""
 
+$null = Initialize-Log -RequestedPath $LogPath
+if ($script:LogPath) {
+    Write-Info ($T.LogEnabled -f $script:LogPath)
+    Write-Log 'INFO' "HolyConnect v$HOLYCONNECT_VERSION started"
+    Write-DiagnosticSnapshot "Startup"
+}
+
 # ============================================
 #  CHECK REQUIREMENTS
 # ============================================
 if ($PSVersionTable.PSVersion.Major -lt 5) {
     Write-Fail "PowerShell 5.0+ required (current: $($PSVersionTable.PSVersion))"
-    Write-Host "  $($T.PressKey)" -ForegroundColor Gray
-    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown"); exit 1
+    Exit-HolyConnect 1
 }
 
 # ============================================
@@ -374,10 +592,7 @@ if (-not $isAdmin) {
     Write-Fail $T.AdminRequired
     Write-Host ""
     Write-Host "  $($T.AdminHint)" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "  $($T.PressKey)" -ForegroundColor Gray
-    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-    exit 1
+    Exit-HolyConnect 1
 }
 
 $steps = 6
@@ -407,10 +622,10 @@ if ($rndis -or $piPnp) {
     }
 
     if (-not $rndis -and -not $piPnp) {
+        Write-DiagnosticSnapshot "Step 1 failure: Pi USB device not detected"
         Write-Fail ($T.NotDetected -f $maxWait)
         Write-Info $T.CheckCable
-        Write-Host ""; Write-Host "  $($T.PressKey)" -ForegroundColor Gray
-        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown"); exit 1
+        Exit-HolyConnect 1
     }
     if ($rndis) { Write-OK "$($T.Detected): $($rndis.InterfaceDescription)" }
     elseif ($piPnp) { Write-OK "$($T.Detected): $(Get-PiUsbDeviceLabel $piPnp)" }
@@ -430,23 +645,30 @@ if ($rndis) {
     Write-Info $T.DriverAutoInstall
 
     # Method 1: pnputil with built-in RNDIS INF
-    $rndisInf = Join-Path $env:SystemRoot "INF\rndiscmp.inf"
-    if (Test-Path $rndisInf) {
-        & $PNPUTIL /add-driver $rndisInf /install 2>&1 | Out-Null
-        Start-Sleep 5
-        & $PNPUTIL /scan-devices 2>&1 | Out-Null
-        Start-Sleep 5
-        $rndis = Get-RNDISAdapter
+    $rndisInfs = @(Get-RndisInfCandidates)
+    if ($rndisInfs.Count -gt 0) {
+        foreach ($rndisInf in $rndisInfs) {
+            Write-Log 'INFO' "Trying built-in RNDIS INF: $rndisInf"
+            $null = Invoke-CapturedCommand -CommandPath $PNPUTIL -Arguments @('/add-driver', $rndisInf, '/install')
+            Start-Sleep 5
+            $null = Invoke-CapturedCommand -CommandPath $PNPUTIL -Arguments @('/scan-devices')
+            Start-Sleep 5
+            $rndis = Get-RNDISAdapter
+            if ($rndis) { break }
+        }
+    } else {
+        Write-Warn $T.DriverInfMissing
+        Write-Log 'WARN' "No built-in RNDIS INF files were found in $env:SystemRoot\INF"
     }
 
     # Method 2: Restart misidentified device
     if (-not $rndis) {
-        $piDev = Get-PnpDevice | Where-Object { $_.InstanceId -match 'VID_0525&PID_A4A2' -and $_.Class -ne 'Net' } | Select-Object -First 1
-        if ($piDev) {
+        $piDev = Get-PiUsbDevice
+        if ($piDev -and $piDev.Class -ne 'Net') {
             Write-Info $T.DriverRestarting
-            & $PNPUTIL /remove-device "$($piDev.InstanceId)" 2>&1 | Out-Null
+            $null = Invoke-CapturedCommand -CommandPath $PNPUTIL -Arguments @('/remove-device', $piDev.InstanceId)
             Start-Sleep 3
-            & $PNPUTIL /scan-devices 2>&1 | Out-Null
+            $null = Invoke-CapturedCommand -CommandPath $PNPUTIL -Arguments @('/scan-devices')
             Start-Sleep 8
             $rndis = Get-RNDISAdapter
         }
@@ -491,10 +713,10 @@ if ($rndis) {
     }
 
     if (-not $rndis) {
+        Write-DiagnosticSnapshot "Step 2 failure: RNDIS adapter missing after install attempts"
         Write-Fail $T.DriverFailed
         Write-Info $T.DriverRetry
-        Write-Host ""; Write-Host "  $($T.PressKey)" -ForegroundColor Gray
-        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown"); exit 1
+        Exit-HolyConnect 1
     }
     Write-OK "$($T.DriverInstalled): $($rndis.Name) ($($rndis.InterfaceDescription))"
 }
@@ -511,6 +733,7 @@ if ($rndis.Status -ne 'Up') {
 #  STEP 3: CONFIGURE STATIC IP
 # ============================================
 Write-Step 3 $steps $T.Step3
+Write-Log 'INFO' ("Configuring USB adapter {0} (ifIndex={1})" -f $rndis.Name, $rndis.ifIndex)
 
 # Remove existing IP config (handles DHCP, multiple IPs, etc.)
 Set-NetIPInterface -InterfaceIndex $rndis.ifIndex -Dhcp Disabled -ErrorAction SilentlyContinue
@@ -665,6 +888,7 @@ if ($piIP) {
         Start-Process "http://$piIP/"
     }
 } else {
+    Write-DiagnosticSnapshot "Step 5 failure: Pi-Star not reachable on USB network"
     Write-Host "  ======================================================" -ForegroundColor Yellow
     Write-Host "     $($T.NotFound)" -ForegroundColor Yellow
     Write-Host "  ======================================================" -ForegroundColor Yellow
@@ -683,6 +907,4 @@ if ($piIP) {
     Write-Host "    http://$HOLYCONNECT_PI_IP/" -ForegroundColor Cyan
 }
 
-Write-Host ""
-Write-Host "  $($T.PressKey)" -ForegroundColor Gray
-$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+Exit-HolyConnect 0

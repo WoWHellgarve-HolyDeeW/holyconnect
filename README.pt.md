@@ -81,6 +81,7 @@ holyconnect/
 | **Sem dependencias** | Usa apenas ferramentas built-in do Windows (PowerShell 5.1+) |
 | **MS OS Descriptors** | Windows reconhece Pi como RNDIS automaticamente |
 | **DHCP fallback** | Pi tenta DHCP primeiro, fallback para 192.168.7.2 estatico |
+| **Logs persistentes** | Guarda diagnostico detalhado de USB / driver / adaptadores / NAT em `windows/logs/*.log` com fallbacks locais seguros |
 | **Override de adaptador** | Opcional `-InternetAdapterName` para PCs com VPN, rede empresarial ou varias VMs |
 
 ## Compatibilidade
@@ -114,13 +115,27 @@ R: Sem problema. O NAT adapta-se automaticamente. A ligacao Pi↔PC e sempre 192
 R: Apenas adiciona um servico USB gadget e config de rede. O Pi-Star em si nao e alterado.
 
 **P: Primeira vez num PC novo — preciso de instalar drivers manualmente?**
-R: Normalmente nao. Os MS OS Descriptors fazem o Windows detetar automaticamente. Em versoes mais antigas do Windows, o script guia-te pela instalacao manual (uma vez, ~30 segundos).
+R: Normalmente nao. Os MS OS Descriptors fazem o Windows detetar automaticamente. O HolyConnect agora tambem tenta todos os ficheiros INF RNDIS built-in que encontrar antes de cair na instalacao manual guiada.
+
+**P: Onde vejo logs se um PC novo falhar?**
+R: O HolyConnect grava um log com timestamp em `windows/logs/` ao lado do script sempre que puder. Se essa pasta nao for gravavel, usa `%ProgramData%\HolyConnect\logs` ou `%TEMP%\HolyConnect`. O log inclui deteccao USB, tentativas de driver, escolha de adaptador, rotas e estado NAT.
+
+## Suporte e Bugs
+
+Se abrires issue ou quiseres diagnosticar um PC novo, junta:
+- Modelo do Pi e versao do Pi-Star
+- Modelo da placa hotspot
+- Versao do Windows
+- Log gerado pelo HolyConnect
 
 **P: Isto vai mexer nas redes do Hyper-V, Docker, WSL ou VPN?**
 R: As versoes atuais nao apagam outras regras NAT do Windows. Se `192.168.7.0/24` ja estiver ocupado, o HolyConnect reutiliza esse NAT quando possivel ou fica em modo local apenas por USB.
 
 **P: E se o auto-detetar escolher o adaptador errado num PC esquisito?**
 R: Na maioria dos PCs funciona sozinho. Nos casos limite, corre `HolyConnect.ps1 -InternetAdapterName "Nome do Adaptador"` numa PowerShell elevada.
+
+**P: Posso usar dongle Wi-Fi USB e HolyConnect ao mesmo tempo?**
+R: Nao no Pi Zero W para o modo HolyConnect. A mesma porta USB DATA e usada em modo device para o HolyConnect e em modo host para um dongle Wi-Fi externo, por isso tens de escolher um ou outro em cada momento. O processo certo e usar HolyConnect para configurar, desligar o PC e depois trocar essa porta para um adaptador OTG + dongle Wi-Fi para uso standalone.
 
 ## Licenca
 

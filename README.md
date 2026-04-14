@@ -83,6 +83,7 @@ holyconnect/
 | **No dependencies** | Uses only built-in Windows tools (PowerShell 5.1+) |
 | **MS OS Descriptors** | Windows recognizes Pi as RNDIS device automatically |
 | **DHCP fallback** | Pi tries DHCP first, falls back to static 192.168.7.2 |
+| **Persistent logs** | Saves detailed USB / driver / adapter / NAT diagnostics to `windows/logs/*.log` with safe local fallbacks |
 | **Adapter override** | Optional `-InternetAdapterName` for unusual VPN / corporate / VM-heavy PCs |
 
 ## Compatibility
@@ -116,7 +117,10 @@ A: No problem. NAT adapts automatically. The Pi↔PC link is always 192.168.7.x.
 A: It only adds a USB gadget service and network config. Pi-Star itself is untouched.
 
 **Q: First time on a new PC — do I need to install drivers manually?**
-A: Usually no. The MS OS Descriptors make Windows auto-detect it. On older Windows versions, the script guides you through a one-time manual driver install (~30 seconds).
+A: Usually no. The MS OS Descriptors make Windows auto-detect it. HolyConnect now also tries every built-in Windows RNDIS INF it can find before falling back to the guided one-time manual install.
+
+**Q: Where do I find logs if a new PC fails?**
+A: HolyConnect writes a timestamped log to `windows/logs/` next to the script when possible. If that folder is not writable, it falls back to `%ProgramData%\HolyConnect\logs` or `%TEMP%\HolyConnect`. The log includes USB detection, driver install attempts, adapter selection, routes and NAT state.
 
 **Q: Will this mess with Hyper-V, Docker, WSL or VPN networking?**
 A: Current versions do not delete other Windows NAT rules. If `192.168.7.0/24` is already claimed, HolyConnect reuses that NAT when possible or keeps USB access local-only.
@@ -125,7 +129,7 @@ A: Current versions do not delete other Windows NAT rules. If `192.168.7.0/24` i
 A: Most PCs are fully automatic. For edge cases, run `HolyConnect.ps1 -InternetAdapterName "Adapter Name"` once from an elevated PowerShell window.
 
 **Q: Can I use Wi-Fi dongle AND USB tethering?**
-A: The Pi Zero W has only one USB port. You can use either a USB cable (HolyConnect) or a Wi-Fi dongle, not both simultaneously (unless you add a USB hub with OTG adapter).
+A: Not for HolyConnect on a Pi Zero W. The same USB data port is used in device mode for HolyConnect and in host mode for an external Wi-Fi dongle, so this is a one-or-the-other choice. Use HolyConnect first for setup, then disconnect the PC and switch the data port to an OTG adapter + Wi-Fi dongle for standalone use.
 
 ## Technical Details
 
@@ -151,7 +155,7 @@ Found a bug? Have a board that doesn't work? Open an issue with:
 - Your Pi model and Pi-Star version
 - The MMDVM board model
 - Windows version
-- Output of the script
+- The generated HolyConnect log file
 
 Pull requests welcome!
 
