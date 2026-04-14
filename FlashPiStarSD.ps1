@@ -602,6 +602,23 @@ function Prepare-TargetDiskForRawWrite {
     } catch {}
 }
 
+function Set-TargetDiskOfflineState {
+    param(
+        [int]$TargetDiskNumber,
+        [bool]$IsOffline
+    )
+
+    try {
+        Set-Disk -Number $TargetDiskNumber -IsOffline $IsOffline -ErrorAction Stop
+        try {
+            Update-HostStorageCache
+        } catch {}
+        return $true
+    } catch {
+        return $false
+    }
+}
+
 function Write-ImageToDisk {
     param(
         [string]$ResolvedImagePath,
@@ -617,20 +634,54 @@ function Write-ImageToDisk {
 
     Prepare-TargetDiskForRawWrite -TargetDiskNumber $TargetDiskNumber
 
-    $diskBusType = [string]$disk.BusType
+    $diskWasOffline = [bool]$disk.IsOffline
+    $diskOfflinedForWrite = $false
     $source = $null
     $target = $null
     $writeDenied = $false
 
     try {
-        if ($diskBusType -ne 'USB') {
-            try {
-                Set-Disk -Number $TargetDiskNumber -IsOffline $true -ErrorAction Stop
-            } catch {}
+        if (-not $diskWasOffline) {
+            $diskOfflinedForWrite = Set-TargetDiskOfflineState -TargetDiskNumber $TargetDiskNumber -IsOffline $true
         }
 
         $source = [System.IO.File]::Open($ResolvedImagePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
-        $target = New-Object System.IO.FileStream("\\.\PhysicalDrive$TargetDiskNumber", [System.IO.FileMode]::Open, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        $openTargetError = $null
+        foreach ($attempt in 1..3) {
+            try {
+                $target = New-Object System.IO.FileStream("\\.\PhysicalDrive$TargetDiskNumber", [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+                $openTargetError = $null
+                break
+            }
+            catch [System.UnauthorizedAccessException] {
+                $writeDenied = $true
+                $openTargetError = $_
+            }
+            catch [System.IO.IOException] {
+                if ($_.Exception.Message -match 'access|denied|acesso negado|sharing violation') {
+                    $writeDenied = $true
+                    $openTargetError = $_
+                } else {
+                    throw
+                }
+            }
+
+            if ($attempt -lt 3) {
+                Prepare-TargetDiskForRawWrite -TargetDiskNumber $TargetDiskNumber
+                if (-not $diskWasOffline -and -not $diskOfflinedForWrite) {
+                    $diskOfflinedForWrite = Set-TargetDiskOfflineState -TargetDiskNumber $TargetDiskNumber -IsOffline $true
+                }
+                Start-Sleep -Seconds 2
+                continue
+            }
+        }
+
+        if (-not $target) {
+            if ($openTargetError) {
+                throw $openTargetError.Exception
+            }
+            throw $T.RawWriteDenied
+        }
 
         $buffer = New-Object byte[] (4MB)
         $written = 0L
@@ -663,10 +714,8 @@ function Write-ImageToDisk {
         if ($target) { $target.Dispose() }
         if ($source) { $source.Dispose() }
 
-        if ($diskBusType -ne 'USB') {
-            try {
-                Set-Disk -Number $TargetDiskNumber -IsOffline $false -ErrorAction Stop
-            } catch {}
+        if ($diskOfflinedForWrite) {
+            $null = Set-TargetDiskOfflineState -TargetDiskNumber $TargetDiskNumber -IsOffline $false
         }
 
         try {
