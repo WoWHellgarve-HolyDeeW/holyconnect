@@ -74,6 +74,8 @@ if ($Lang -eq 'pt') {
     $T.TargetDisk           = 'Disco de destino: {0} - {1} - {2} GB'
     $T.ConfirmErase         = 'ATENCAO: todo o conteudo desse disco vai ser apagado. Escreve YES para continuar'
     $T.Cancelled            = 'Operacao cancelada pelo utilizador.'
+    $T.DiskPreparing        = 'A desmontar volumes do cartao SD para gravacao direta...'
+    $T.RawWriteDenied       = 'O Windows ainda esta a usar o cartao SD. Fecha Explorador/Fotos/antivirus nesse cartao, remove a letra se aparecer montada, e tenta de novo.'
     $T.WritingProgress      = 'Gravado {0}% ({1} GB / {2} GB)'
     $T.WriteDone            = 'Imagem escrita com sucesso'
     $T.BootWait             = 'A aguardar que o Windows monte a particao boot do Pi-Star...'
@@ -127,6 +129,8 @@ if ($Lang -eq 'pt') {
     $T.TargetDisk           = 'Target disk: {0} - {1} - {2} GB'
     $T.ConfirmErase         = 'WARNING: all content on that disk will be erased. Type YES to continue'
     $T.Cancelled            = 'Operation cancelled by user.'
+    $T.DiskPreparing        = 'Dismounting SD card volumes for raw write...'
+    $T.RawWriteDenied       = 'Windows is still using the SD card. Close Explorer/Photos/antivirus on that card, remove its drive letter if it stays mounted, and try again.'
     $T.WritingProgress      = 'Written {0}% ({1} GB / {2} GB)'
     $T.WriteDone            = 'Image written successfully'
     $T.BootWait             = 'Waiting for Windows to mount the Pi-Star boot partition...'
@@ -511,6 +515,34 @@ function Confirm-DestructiveWrite {
     }
 }
 
+function Prepare-TargetDiskForRawWrite {
+    param([int]$TargetDiskNumber)
+
+    Write-Info $T.DiskPreparing
+
+    $partitions = @(Get-Partition -DiskNumber $TargetDiskNumber -ErrorAction SilentlyContinue | Sort-Object PartitionNumber)
+    foreach ($partition in $partitions) {
+        $accessPaths = @($partition.AccessPaths | Where-Object { $_ -and $_ -match '^[A-Z]:\\$' })
+        foreach ($accessPath in $accessPaths) {
+            $driveLetter = $accessPath.Substring(0, 1)
+
+            if (Get-Command Dismount-Volume -ErrorAction SilentlyContinue) {
+                try {
+                    Dismount-Volume -DriveLetter $driveLetter -Force -ErrorAction Stop | Out-Null
+                } catch {}
+            }
+
+            try {
+                Remove-PartitionAccessPath -DiskNumber $TargetDiskNumber -PartitionNumber $partition.PartitionNumber -AccessPath $accessPath -ErrorAction Stop
+            } catch {}
+        }
+    }
+
+    try {
+        Update-HostStorageCache
+    } catch {}
+}
+
 function Write-ImageToDisk {
     param(
         [string]$ResolvedImagePath,
@@ -524,9 +556,12 @@ function Write-ImageToDisk {
         } catch {}
     }
 
+    Prepare-TargetDiskForRawWrite -TargetDiskNumber $TargetDiskNumber
+
     $diskBusType = [string]$disk.BusType
     $source = $null
     $target = $null
+    $writeDenied = $false
 
     try {
         if ($diskBusType -ne 'USB') {
@@ -536,7 +571,7 @@ function Write-ImageToDisk {
         }
 
         $source = [System.IO.File]::Open($ResolvedImagePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
-        $target = New-Object System.IO.FileStream("\\.\PhysicalDrive$TargetDiskNumber", [System.IO.FileMode]::Open, [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite)
+        $target = New-Object System.IO.FileStream("\\.\PhysicalDrive$TargetDiskNumber", [System.IO.FileMode]::Open, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
 
         $buffer = New-Object byte[] (4MB)
         $written = 0L
@@ -555,6 +590,16 @@ function Write-ImageToDisk {
 
         $target.Flush()
     }
+    catch [System.UnauthorizedAccessException] {
+        $writeDenied = $true
+        throw
+    }
+    catch [System.IO.IOException] {
+        if ($_.Exception.Message -match 'access|denied|acesso negado') {
+            $writeDenied = $true
+        }
+        throw
+    }
     finally {
         if ($target) { $target.Dispose() }
         if ($source) { $source.Dispose() }
@@ -568,6 +613,10 @@ function Write-ImageToDisk {
         try {
             Update-HostStorageCache
         } catch {}
+
+        if ($writeDenied) {
+            throw $T.RawWriteDenied
+        }
     }
 }
 
