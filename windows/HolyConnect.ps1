@@ -250,6 +250,21 @@ function Get-RNDISAdapter {
     Get-NetAdapter | Where-Object { $_.InterfaceDescription -match 'RNDIS|Remote NDIS' } | Select-Object -First 1
 }
 
+function Get-PiUsbDevice {
+    Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
+        Where-Object { $_.InstanceId -match 'VID_0525' } |
+        Sort-Object @{ Expression = { $_.Status -eq 'OK' }; Descending = $true }, @{ Expression = { $_.Class -eq 'Net' }; Descending = $true } |
+        Select-Object -First 1
+}
+
+function Get-PiUsbDeviceLabel($device) {
+    if (-not $device) { return $null }
+    foreach ($label in @($device.FriendlyName, $device.Name, $device.InstanceId)) {
+        if ($label) { return $label }
+    }
+    return "Pi USB device"
+}
+
 function Get-AvailableNatName {
     $preferredNames = @("HolyConnectNAT", "HolyConnectNAT-$($env:COMPUTERNAME)", "PiStarNAT")
     foreach ($name in $preferredNames) {
@@ -373,11 +388,11 @@ $steps = 6
 Write-Step 1 $steps $T.Step1
 
 $rndis = Get-RNDISAdapter
-$piPnp = Get-PnpDevice -ErrorAction SilentlyContinue | Where-Object { $_.InstanceId -match 'VID_0525' -and $_.Status -eq 'OK' } | Select-Object -First 1
+$piPnp = Get-PiUsbDevice
 
 if ($rndis -or $piPnp) {
     if ($rndis) { Write-OK "$($T.AlreadyConnected): $($rndis.InterfaceDescription)" }
-    elseif ($piPnp) { Write-OK "$($T.Detected): $($piPnp.FriendlyName)" }
+    elseif ($piPnp) { Write-OK "$($T.Detected): $(Get-PiUsbDeviceLabel $piPnp)" }
 } else {
     Write-Info $T.PlugIn
     Write-Info $T.BootWait
@@ -386,7 +401,7 @@ if ($rndis -or $piPnp) {
     while ($t -lt $maxWait) {
         Start-Sleep 5; $t += 5
         $rndis = Get-RNDISAdapter
-        $piPnp = Get-PnpDevice -ErrorAction SilentlyContinue | Where-Object { $_.InstanceId -match 'VID_0525' -and $_.Status -eq 'OK' } | Select-Object -First 1
+        $piPnp = Get-PiUsbDevice
         if ($rndis -or $piPnp) { break }
         if ($t % 15 -eq 0) { Write-Info "$($T.Waiting)... ($t sec)" }
     }
@@ -398,7 +413,7 @@ if ($rndis -or $piPnp) {
         $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown"); exit 1
     }
     if ($rndis) { Write-OK "$($T.Detected): $($rndis.InterfaceDescription)" }
-    elseif ($piPnp) { Write-OK "$($T.Detected): $($piPnp.FriendlyName)" }
+    elseif ($piPnp) { Write-OK "$($T.Detected): $(Get-PiUsbDeviceLabel $piPnp)" }
 }
 
 # ============================================
