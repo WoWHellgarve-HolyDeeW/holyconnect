@@ -24,7 +24,7 @@
 set +e  # Don't abort on non-critical errors
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-HOLYCONNECT_VERSION="1.0.3"
+HOLYCONNECT_VERSION="1.0.4"
 GADGET_SCRIPT="/usr/local/bin/usb-gadget.sh"
 GADGET_SERVICE="/etc/systemd/system/usb-gadget.service"
 LOG="/boot/holyconnect_install.log"

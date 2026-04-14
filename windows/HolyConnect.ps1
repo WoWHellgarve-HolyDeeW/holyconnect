@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    HolyConnect v1.0.3 - Pi-Star USB Tethering for Windows
+    HolyConnect v1.0.4 - Pi-Star USB Tethering for Windows
 .DESCRIPTION
     Automatically connects to a Pi-Star MMDVM hotspot via USB cable.
     Detects Pi, installs RNDIS driver if needed, configures networking,
@@ -13,6 +13,10 @@
     Don't open browser at the end
 .PARAMETER InternetAdapterName
     Optional adapter name override for unusual Windows networking setups
+.PARAMETER ExportDiagnostics
+    Generate an exportable diagnostics package at the end of the run
+.PARAMETER DiagnosticsPath
+    Optional diagnostics output directory. Defaults to windows\diagnostics with local fallbacks
 .PARAMETER LogPath
     Optional log file path. Defaults to windows\logs with local fallbacks
 .PARAMETER Lang
@@ -25,13 +29,15 @@ param(
     [switch]$NoNAT,
     [switch]$NoBrowser,
     [string]$InternetAdapterName,
+    [switch]$ExportDiagnostics,
+    [string]$DiagnosticsPath,
     [string]$LogPath,
     [ValidateSet('pt','en')][string]$Lang
 )
 
 $ErrorActionPreference = "Continue"
 $Host.UI.RawUI.WindowTitle = "HolyConnect"
-$HOLYCONNECT_VERSION = "1.0.3"
+$HOLYCONNECT_VERSION = "1.0.4"
 $HOLYCONNECT_HOST_IP = "192.168.7.1"
 $HOLYCONNECT_PI_IP = "192.168.7.2"
 $HOLYCONNECT_NAT_PREFIX = "192.168.7.0/24"
@@ -53,6 +59,9 @@ if ($Lang -eq 'pt') {
     $T.AdminHint         = "Clica direito -> 'Executar como Administrador'"
     $T.LogEnabled        = "Logs guardados em {0}"
     $T.LogLabel          = "Log"
+    $T.DiagnosticsLabel  = "Diagnostico"
+    $T.DiagnosticsReady  = "Pacote de diagnostico guardado em {0}"
+    $T.DiagnosticsFailed = "Nao foi possivel gerar o pacote de diagnostico exportavel."
     $T.Step1             = "A procurar dispositivo Pi USB..."
     $T.PlugIn            = "Liga o Pi ao PC pelo cabo USB (porta DATA, nao PWR)"
     $T.BootWait          = "O Pi demora ~60-90 seg a arrancar..."
@@ -124,6 +133,9 @@ if ($Lang -eq 'pt') {
     $T.AdminHint         = "Right-click -> 'Run as Administrator'"
     $T.LogEnabled        = "Logs saved to {0}"
     $T.LogLabel          = "Log"
+    $T.DiagnosticsLabel  = "Diagnostics"
+    $T.DiagnosticsReady  = "Diagnostics package saved to {0}"
+    $T.DiagnosticsFailed = "Could not generate an exportable diagnostics package."
     $T.Step1             = "Searching for Pi USB device..."
     $T.PlugIn            = "Connect Pi to PC via USB cable (DATA port, not PWR)"
     $T.BootWait          = "Pi takes ~60-90 sec to boot..."
@@ -196,6 +208,9 @@ if ($Lang -eq 'pt') {
 #  HELPERS
 # ============================================
 $script:LogPath = $null
+$script:DiagnosticsPackagePath = $null
+$script:RunStartedAt = Get-Date
+$script:LastOutcomeReason = $null
 
 function Initialize-Log {
     param([string]$RequestedPath)
@@ -231,6 +246,37 @@ function Initialize-Log {
     return $null
 }
 
+function Initialize-DiagnosticsRoot {
+    param([string]$RequestedPath)
+
+    $candidates = [System.Collections.Generic.List[string]]::new()
+    if ($RequestedPath) {
+        $candidates.Add($RequestedPath)
+    } else {
+        $candidates.Add((Join-Path $PSScriptRoot "diagnostics"))
+        if ($env:ProgramData) {
+            $candidates.Add((Join-Path $env:ProgramData "HolyConnect\diagnostics"))
+        }
+        if ($env:TEMP) {
+            $candidates.Add((Join-Path $env:TEMP "HolyConnect\diagnostics"))
+        }
+    }
+
+    foreach ($candidate in $candidates) {
+        try {
+            if (-not (Test-Path $candidate)) {
+                New-Item -ItemType Directory -Path $candidate -Force -ErrorAction Stop | Out-Null
+            }
+            $probe = Join-Path $candidate ".holyconnect_write_test"
+            Set-Content -Path $probe -Value "ok" -Encoding UTF8 -ErrorAction Stop
+            Remove-Item $probe -Force -ErrorAction SilentlyContinue
+            return $candidate
+        } catch {}
+    }
+
+    return $null
+}
+
 function Write-Log($level, $msg) {
     if (-not $script:LogPath -or [string]::IsNullOrWhiteSpace($msg)) { return }
 
@@ -248,13 +294,193 @@ function Write-Info($msg)  { Write-Log 'INFO' $msg; Write-Host "  $msg" -Foregro
 function Write-Warn($msg)  { Write-Log 'WARN' $msg; Write-Host "  [!] $msg" -ForegroundColor DarkYellow }
 function Write-Fail($msg)  { Write-Log 'FAIL' $msg; Write-Host "  [X] $msg" -ForegroundColor Red }
 
+function Export-TextDiagnostic {
+    param(
+        [string]$PackageDir,
+        [string]$FileName,
+        [scriptblock]$ScriptBlock
+    )
+
+    $path = Join-Path $PackageDir $FileName
+    try {
+        $text = & $ScriptBlock | Out-String -Width 4096
+        if (-not $text) { $text = "(no output)" }
+        Set-Content -Path $path -Value $text -Encoding UTF8 -ErrorAction Stop
+    } catch {
+        Set-Content -Path $path -Value "ERROR: $($_.Exception.Message)" -Encoding UTF8 -ErrorAction SilentlyContinue
+    }
+}
+
+function Export-DiagnosticsPackage {
+    param(
+        [int]$ExitCode,
+        [string]$Reason
+    )
+
+    $root = Initialize-DiagnosticsRoot -RequestedPath $DiagnosticsPath
+    if (-not $root) {
+        Write-Log 'WARN' $T.DiagnosticsFailed
+        return $null
+    }
+
+    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $packageName = "holyconnect_diagnostics_${timestamp}"
+    $packageDir = Join-Path $root $packageName
+
+    try {
+        New-Item -ItemType Directory -Path $packageDir -Force -ErrorAction Stop | Out-Null
+    } catch {
+        Write-Log 'WARN' "Failed to create diagnostics directory: $($_.Exception.Message)"
+        return $null
+    }
+
+    $result = if ($ExitCode -eq 0) { 'success' } elseif ($ExitCode -eq 2) { 'partial-failure' } else { 'failure' }
+    $summaryLines = [System.Collections.Generic.List[string]]::new()
+    $summaryLines.Add("HolyConnect Diagnostics Package")
+    $summaryLines.Add("Version: $HOLYCONNECT_VERSION")
+    $summaryLines.Add("Created: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')")
+    $summaryLines.Add("Result: $result")
+    $summaryLines.Add("ExitCode: $ExitCode")
+    $summaryLines.Add("Language: $Lang")
+    $summaryLines.Add("NoNAT: $([bool]$NoNAT)")
+    if ($Reason) { $summaryLines.Add("Reason: $Reason") }
+    if ($rndis) { $summaryLines.Add("UsbAdapter: $($rndis.Name) [$($rndis.InterfaceDescription)]") }
+    if ($piIP) { $summaryLines.Add("PiAddress: $piIP") }
+    if ($internetAdapter) { $summaryLines.Add("InternetAdapter: $($internetAdapter.Name) [$($internetAdapter.InterfaceDescription)]") }
+    $summaryLines.Add("NatActive: $natActive")
+    if ($script:LogPath) { $summaryLines.Add("LogFile: $(Split-Path $script:LogPath -Leaf)") }
+    Set-Content -Path (Join-Path $packageDir 'summary.txt') -Value $summaryLines -Encoding UTF8 -ErrorAction SilentlyContinue
+
+    $manifest = [ordered]@{
+        holyConnectVersion = $HOLYCONNECT_VERSION
+        createdAt = (Get-Date).ToString('o')
+        exitCode = $ExitCode
+        result = $result
+        reason = $Reason
+        language = $Lang
+        parameters = [ordered]@{
+            noNAT = [bool]$NoNAT
+            noBrowser = [bool]$NoBrowser
+            internetAdapterName = $InternetAdapterName
+            exportDiagnostics = [bool]$ExportDiagnostics
+            customLogPath = [bool](-not [string]::IsNullOrWhiteSpace($LogPath))
+            customDiagnosticsPath = [bool](-not [string]::IsNullOrWhiteSpace($DiagnosticsPath))
+        }
+        observedState = [ordered]@{
+            piAddress = $piIP
+            natActive = $natActive
+            usbAdapter = if ($rndis) { [ordered]@{ name = $rndis.Name; interfaceDescription = $rndis.InterfaceDescription; status = $rndis.Status } } else { $null }
+            internetAdapter = if ($internetAdapter) { [ordered]@{ name = $internetAdapter.Name; interfaceDescription = $internetAdapter.InterfaceDescription; status = $internetAdapter.Status } } else { $null }
+        }
+    }
+    $manifest | ConvertTo-Json -Depth 8 | Set-Content -Path (Join-Path $packageDir 'manifest.json') -Encoding UTF8 -ErrorAction SilentlyContinue
+
+    if ($script:LogPath -and (Test-Path $script:LogPath)) {
+        Copy-Item $script:LogPath (Join-Path $packageDir (Split-Path $script:LogPath -Leaf)) -Force -ErrorAction SilentlyContinue
+    }
+
+    Export-TextDiagnostic -PackageDir $packageDir -FileName 'os.txt' -ScriptBlock {
+        Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue |
+            Select-Object Caption, Version, BuildNumber, OSArchitecture, CSName, LastBootUpTime |
+            Format-List *
+    }
+
+    Export-TextDiagnostic -PackageDir $packageDir -FileName 'adapters.txt' -ScriptBlock {
+        Get-NetAdapter -ErrorAction SilentlyContinue |
+            Sort-Object ifIndex |
+            Select-Object Name, Status, ifIndex, MacAddress, HardwareInterface, InterfaceDescription |
+            Format-Table -AutoSize
+    }
+
+    Export-TextDiagnostic -PackageDir $packageDir -FileName 'ip-addresses.txt' -ScriptBlock {
+        Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+            Sort-Object InterfaceIndex |
+            Select-Object InterfaceAlias, InterfaceIndex, IPAddress, PrefixLength, PrefixOrigin, AddressState, SkipAsSource |
+            Format-Table -AutoSize
+    }
+
+    Export-TextDiagnostic -PackageDir $packageDir -FileName 'routes.txt' -ScriptBlock {
+        Get-NetRoute -DestinationPrefix '0.0.0.0/0' -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+            Sort-Object RouteMetric |
+            Select-Object ifIndex, InterfaceAlias, NextHop, RouteMetric, DestinationPrefix |
+            Format-Table -AutoSize
+    }
+
+    Export-TextDiagnostic -PackageDir $packageDir -FileName 'pnp.txt' -ScriptBlock {
+        Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
+            Where-Object { $_.InstanceId -match 'VID_0525|RNDIS' } |
+            Select-Object Status, Class, FriendlyName, Name, InstanceId, Problem |
+            Format-List *
+    }
+
+    Export-TextDiagnostic -PackageDir $packageDir -FileName 'rndis-adapters.txt' -ScriptBlock {
+        Get-RNDISAdapters |
+            Select-Object Name, Status, ifIndex, InterfaceDescription |
+            Format-Table -AutoSize
+    }
+
+    Export-TextDiagnostic -PackageDir $packageDir -FileName 'nat.txt' -ScriptBlock {
+        if (Get-Command Get-NetNat -ErrorAction SilentlyContinue) {
+            Get-NetNat -ErrorAction SilentlyContinue | Format-List *
+        } else {
+            'Get-NetNat is not available on this Windows version.'
+        }
+    }
+
+    Export-TextDiagnostic -PackageDir $packageDir -FileName 'state.txt' -ScriptBlock {
+        @(
+            "RunStarted: $($script:RunStartedAt.ToString('o'))"
+            "RunFinished: $((Get-Date).ToString('o'))"
+            "Reason: $Reason"
+            "PiIP: $piIP"
+            "NatActive: $natActive"
+            "UsbAdapter: $(if ($rndis) { $rndis.Name } else { '(none)' })"
+            "InternetAdapter: $(if ($internetAdapter) { $internetAdapter.Name } else { '(none)' })"
+        )
+    }
+
+    $archivePath = Join-Path $root "$packageName.zip"
+    if (Get-Command Compress-Archive -ErrorAction SilentlyContinue) {
+        try {
+            Compress-Archive -Path (Join-Path $packageDir '*') -DestinationPath $archivePath -CompressionLevel Optimal -Force -ErrorAction Stop
+            Remove-Item $packageDir -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Log 'INFO' ("Diagnostics package written to {0}" -f $archivePath)
+            return $archivePath
+        } catch {
+            Write-Log 'WARN' ("Failed to compress diagnostics package: {0}" -f $_.Exception.Message)
+        }
+    }
+
+    Write-Log 'INFO' ("Diagnostics package directory created at {0}" -f $packageDir)
+    return $packageDir
+}
+
 function Exit-HolyConnect {
-    param([int]$Code = 0)
+    param(
+        [int]$Code = 0,
+        [string]$Reason
+    )
+
+    if ($Reason) {
+        $script:LastOutcomeReason = $Reason
+    }
+    $effectiveReason = if ($script:LastOutcomeReason) { $script:LastOutcomeReason } else { if ($Code -eq 0) { 'Completed' } else { 'Failed' } }
 
     if ($script:LogPath) {
+        Write-Log 'INFO' "Outcome: $effectiveReason"
+        Write-Log 'INFO' "Exit code: $Code"
         Write-Host ""
         Write-Host "  $($T.LogLabel): $script:LogPath" -ForegroundColor DarkGray
-        Write-Log 'INFO' "Exit code: $Code"
+    }
+
+    if ($Code -ne 0 -or $ExportDiagnostics) {
+        $script:DiagnosticsPackagePath = Export-DiagnosticsPackage -ExitCode $Code -Reason $effectiveReason
+        if ($script:DiagnosticsPackagePath) {
+            Write-Host "  $($T.DiagnosticsLabel): $script:DiagnosticsPackagePath" -ForegroundColor DarkGray
+            Write-Log 'INFO' ($T.DiagnosticsReady -f $script:DiagnosticsPackagePath)
+        } else {
+            Write-Warn $T.DiagnosticsFailed
+        }
     }
 
     Write-Host ""
@@ -579,7 +805,7 @@ if ($script:LogPath) {
 # ============================================
 if ($PSVersionTable.PSVersion.Major -lt 5) {
     Write-Fail "PowerShell 5.0+ required (current: $($PSVersionTable.PSVersion))"
-    Exit-HolyConnect 1
+    Exit-HolyConnect 1 "PowerShell 5.0+ required"
 }
 
 # ============================================
@@ -592,7 +818,7 @@ if (-not $isAdmin) {
     Write-Fail $T.AdminRequired
     Write-Host ""
     Write-Host "  $($T.AdminHint)" -ForegroundColor Yellow
-    Exit-HolyConnect 1
+    Exit-HolyConnect 1 $T.AdminRequired
 }
 
 $steps = 6
@@ -625,7 +851,7 @@ if ($rndis -or $piPnp) {
         Write-DiagnosticSnapshot "Step 1 failure: Pi USB device not detected"
         Write-Fail ($T.NotDetected -f $maxWait)
         Write-Info $T.CheckCable
-        Exit-HolyConnect 1
+        Exit-HolyConnect 1 "Pi USB device not detected"
     }
     if ($rndis) { Write-OK "$($T.Detected): $($rndis.InterfaceDescription)" }
     elseif ($piPnp) { Write-OK "$($T.Detected): $(Get-PiUsbDeviceLabel $piPnp)" }
@@ -716,7 +942,7 @@ if ($rndis) {
         Write-DiagnosticSnapshot "Step 2 failure: RNDIS adapter missing after install attempts"
         Write-Fail $T.DriverFailed
         Write-Info $T.DriverRetry
-        Exit-HolyConnect 1
+        Exit-HolyConnect 1 "RNDIS adapter missing after install attempts"
     }
     Write-OK "$($T.DriverInstalled): $($rndis.Name) ($($rndis.InterfaceDescription))"
 }
@@ -905,6 +1131,7 @@ if ($piIP) {
         Write-Host "    http://${sub}.2/" -ForegroundColor Cyan
     }
     Write-Host "    http://$HOLYCONNECT_PI_IP/" -ForegroundColor Cyan
+    Exit-HolyConnect 2 "Pi-Star not reachable on USB network"
 }
 
 Exit-HolyConnect 0

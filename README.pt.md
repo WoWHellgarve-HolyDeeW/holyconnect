@@ -82,6 +82,7 @@ holyconnect/
 | **MS OS Descriptors** | Windows reconhece Pi como RNDIS automaticamente |
 | **DHCP fallback** | Pi tenta DHCP primeiro, fallback para 192.168.7.2 estatico |
 | **Logs persistentes** | Guarda diagnostico detalhado de USB / driver / adaptadores / NAT em `windows/logs/*.log` com fallbacks locais seguros |
+| **Pacote de suporte** | As falhas tentam exportar um pacote de diagnostico, e `HolyConnect.ps1 -ExportDiagnostics` gera um quando quiseres |
 | **Override de adaptador** | Opcional `-InternetAdapterName` para PCs com VPN, rede empresarial ou varias VMs |
 
 ## Compatibilidade
@@ -103,6 +104,27 @@ holyconnect/
 - ZUMspot
 - Outras placas com Pi Zero W devem funcionar
 
+## Matriz de Compatibilidade
+
+Estas linhas sao expectativas operacionais, nao promessas cegas. Nos dongles USB Wi-Fi, o chipset importa mais do que a marca impressa.
+
+### Cenarios Windows
+
+| Cenario | Estado | Comportamento esperado |
+|---------|--------|------------------------|
+| PC Windows 10/11 limpo com admin | Alvo principal | Totalmente automatico no caso comum, ou instalacao RNDIS guiada uma vez |
+| PC com Hyper-V / WSL / Docker / VPNs | Suportado com ressalvas | O acesso USB deve funcionar; a partilha de internet pode reutilizar um NAT `192.168.7.0/24` existente ou ficar local-only |
+| Sem privilegios de administrador | Nao suportado | Windows bloqueia por desenho os passos de driver, IP e NAT |
+| PC sem internet | Suportado para configuracao local | O Pi-Star fica acessivel por USB, mas updates e reflectores nao vao funcionar |
+
+### Cenarios de Dongle Wi-Fi USB
+
+| Familia de dongle | Estado | Notas |
+|-------------------|--------|-------|
+| Dongles 2.4 GHz baseados em MT7601U | Bom candidato | Melhor primeira escolha para uso standalone/movel; ainda assim testa o modelo exato |
+| Dongles 2.4 GHz baseados em RTL8188EU / RTL8188FTV | Misto | Muitas vezes funcionam, mas as revisoes variam muito entre vendedores |
+| Nano dongles dual-band desconhecidos | Risco alto | Evita salvo se ja estiverem validados em Pi-Star; 5 GHz e especialmente inconsistente |
+
 ## FAQ
 
 **P: Preciso de portatil para usar o hotspot no carro?**
@@ -120,13 +142,16 @@ R: Normalmente nao. Os MS OS Descriptors fazem o Windows detetar automaticamente
 **P: Onde vejo logs se um PC novo falhar?**
 R: O HolyConnect grava um log com timestamp em `windows/logs/` ao lado do script sempre que puder. Se essa pasta nao for gravavel, usa `%ProgramData%\HolyConnect\logs` ou `%TEMP%\HolyConnect`. O log inclui deteccao USB, tentativas de driver, escolha de adaptador, rotas e estado NAT.
 
+**P: Como gero um pacote de diagnostico para suporte?**
+R: As falhas agora tentam exportar automaticamente um pacote de diagnostico para `windows/diagnostics/` (com fallback para `%ProgramData%\HolyConnect\diagnostics` e `%TEMP%\HolyConnect\diagnostics`). Para gerar um pacote mesmo num run com sucesso, abre PowerShell elevada e corre `HolyConnect.ps1 -ExportDiagnostics`.
+
 ## Suporte e Bugs
 
 Se abrires issue ou quiseres diagnosticar um PC novo, junta:
 - Modelo do Pi e versao do Pi-Star
 - Modelo da placa hotspot
 - Versao do Windows
-- Log gerado pelo HolyConnect
+- Pacote de diagnostico gerado pelo HolyConnect (ou pelo menos o log)
 
 **P: Isto vai mexer nas redes do Hyper-V, Docker, WSL ou VPN?**
 R: As versoes atuais nao apagam outras regras NAT do Windows. Se `192.168.7.0/24` ja estiver ocupado, o HolyConnect reutiliza esse NAT quando possivel ou fica em modo local apenas por USB.
