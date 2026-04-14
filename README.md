@@ -182,6 +182,10 @@ Found a bug? Have a board that doesn't work? Open an issue with:
 - Windows version
 - The generated HolyConnect diagnostics package (or at least the log file)
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for reporting guidelines and support details.
+
+GitHub issue templates are included for bug reports and compatibility reports.
+
 Pull requests welcome!
 
 ## License

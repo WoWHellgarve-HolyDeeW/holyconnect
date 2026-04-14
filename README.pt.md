@@ -153,6 +153,10 @@ Se abrires issue ou quiseres diagnosticar um PC novo, junta:
 - Versao do Windows
 - Pacote de diagnostico gerado pelo HolyConnect (ou pelo menos o log)
 
+Consulta [CONTRIBUTING.md](CONTRIBUTING.md) para regras curtas de reporte e detalhes de suporte.
+
+O repositório inclui templates de issue para bugs e relatorios de compatibilidade.
+
 **P: Isto vai mexer nas redes do Hyper-V, Docker, WSL ou VPN?**
 R: As versoes atuais nao apagam outras regras NAT do Windows. Se `192.168.7.0/24` ja estiver ocupado, o HolyConnect reutiliza esse NAT quando possivel ou fica em modo local apenas por USB.
 
