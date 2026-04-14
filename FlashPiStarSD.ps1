@@ -32,6 +32,50 @@ $PrepareScriptPath = Join-Path $PSScriptRoot 'PreparePiStarSD.ps1'
 $PreferredImageRoot = Join-Path $PSScriptRoot 'pistar-image'
 $script:GeneratedWifiConfigPath = $null
 
+try {
+    Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
+public static class HolyConnectRawDiskNative {
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    public static extern SafeFileHandle CreateFile(
+        string lpFileName,
+        uint dwDesiredAccess,
+        uint dwShareMode,
+        IntPtr lpSecurityAttributes,
+        uint dwCreationDisposition,
+        uint dwFlagsAndAttributes,
+        IntPtr hTemplateFile);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool DeviceIoControl(
+        SafeFileHandle hDevice,
+        uint dwIoControlCode,
+        IntPtr lpInBuffer,
+        uint nInBufferSize,
+        IntPtr lpOutBuffer,
+        uint nOutBufferSize,
+        out uint lpBytesReturned,
+        IntPtr lpOverlapped);
+}
+"@ -ErrorAction Stop
+} catch {
+    if (-not $_.Exception.Message.Contains('already exists')) {
+        throw
+    }
+}
+
+$RAW_DISK_GENERIC_READ = [uint32]2147483648
+$RAW_DISK_GENERIC_WRITE = [uint32]1073741824
+$RAW_DISK_FILE_SHARE_READ = [uint32]1
+$RAW_DISK_FILE_SHARE_WRITE = [uint32]2
+$RAW_DISK_OPEN_EXISTING = [uint32]3
+$RAW_DISK_FILE_ATTRIBUTE_NORMAL = [uint32]128
+$RAW_DISK_FSCTL_LOCK_VOLUME = [uint32]589848
+$RAW_DISK_FSCTL_DISMOUNT_VOLUME = [uint32]589856
+
 if (-not $Lang) {
     $sysLang = (Get-Culture).TwoLetterISOLanguageName
     $Lang = if ($sysLang -eq 'pt') { 'pt' } else { 'en' }
@@ -602,6 +646,101 @@ function Prepare-TargetDiskForRawWrite {
     } catch {}
 }
 
+function Open-TargetVolumeHandle {
+    param([string]$VolumePath)
+
+    $handle = [HolyConnectRawDiskNative]::CreateFile(
+        $VolumePath,
+        ($RAW_DISK_GENERIC_READ -bor $RAW_DISK_GENERIC_WRITE),
+        ($RAW_DISK_FILE_SHARE_READ -bor $RAW_DISK_FILE_SHARE_WRITE),
+        [IntPtr]::Zero,
+        $RAW_DISK_OPEN_EXISTING,
+        $RAW_DISK_FILE_ATTRIBUTE_NORMAL,
+        [IntPtr]::Zero)
+
+    if ($handle.IsInvalid) {
+        $win32Error = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        throw "CreateFile failed for $VolumePath (Win32 error $win32Error)"
+    }
+
+    return $handle
+}
+
+function Invoke-TargetVolumeControl {
+    param(
+        [Microsoft.Win32.SafeHandles.SafeFileHandle]$Handle,
+        [uint32]$ControlCode,
+        [string]$Label
+    )
+
+    $bytesReturned = [uint32]0
+    $ok = [HolyConnectRawDiskNative]::DeviceIoControl($Handle, $ControlCode, [IntPtr]::Zero, 0, [IntPtr]::Zero, 0, [ref]$bytesReturned, [IntPtr]::Zero)
+    if (-not $ok) {
+        $win32Error = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        throw "$Label failed (Win32 error $win32Error)"
+    }
+}
+
+function Acquire-TargetVolumeLocks {
+    param([int]$TargetDiskNumber)
+
+    $handles = [System.Collections.Generic.List[Microsoft.Win32.SafeHandles.SafeFileHandle]]::new()
+    $partitions = @(Get-Partition -DiskNumber $TargetDiskNumber -ErrorAction SilentlyContinue | Sort-Object PartitionNumber)
+
+    foreach ($partition in $partitions) {
+        if ([string]$partition.Type -match '^Unknown$|Reserved') {
+            continue
+        }
+
+        $driveLetter = $partition.DriveLetter
+        if (-not $driveLetter) {
+            try {
+                Add-PartitionAccessPath -DiskNumber $TargetDiskNumber -PartitionNumber $partition.PartitionNumber -AssignDriveLetter -ErrorAction Stop
+            } catch {}
+
+            try {
+                $partition = Get-Partition -DiskNumber $TargetDiskNumber -PartitionNumber $partition.PartitionNumber -ErrorAction Stop
+                $driveLetter = $partition.DriveLetter
+            } catch {}
+        }
+
+        if (-not $driveLetter) {
+            continue
+        }
+
+        $volume = $null
+        try { $volume = Get-Volume -DriveLetter $driveLetter -ErrorAction Stop } catch {}
+        if (-not $volume -or [string]::IsNullOrWhiteSpace($volume.FileSystem)) {
+            continue
+        }
+
+        $volumePath = '\\.\{0}:' -f $driveLetter
+        $handle = $null
+        try {
+            $handle = Open-TargetVolumeHandle -VolumePath $volumePath
+            Invoke-TargetVolumeControl -Handle $handle -ControlCode $RAW_DISK_FSCTL_LOCK_VOLUME -Label 'FSCTL_LOCK_VOLUME'
+            Invoke-TargetVolumeControl -Handle $handle -ControlCode $RAW_DISK_FSCTL_DISMOUNT_VOLUME -Label 'FSCTL_DISMOUNT_VOLUME'
+            $handles.Add($handle)
+        } catch {
+            if ($handle) {
+                $handle.Dispose()
+            }
+        }
+    }
+
+    return @($handles)
+}
+
+function Release-TargetVolumeLocks {
+    param([object[]]$Handles)
+
+    foreach ($handle in @($Handles)) {
+        if ($handle -and -not $handle.IsClosed) {
+            $handle.Dispose()
+        }
+    }
+}
+
 function Set-TargetDiskOfflineState {
     param(
         [int]$TargetDiskNumber,
@@ -698,6 +837,7 @@ function Write-ImageToDisk {
 
     $diskWasOffline = [bool]$disk.IsOffline
     $diskOfflinedForWrite = $false
+    $volumeLocks = @()
     $source = $null
     $target = $null
     $writeDenied = $false
@@ -710,6 +850,9 @@ function Write-ImageToDisk {
         $source = [System.IO.File]::Open($ResolvedImagePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
         $openTargetError = $null
         foreach ($attempt in 1..3) {
+            Release-TargetVolumeLocks -Handles $volumeLocks
+            $volumeLocks = Acquire-TargetVolumeLocks -TargetDiskNumber $TargetDiskNumber
+
             try {
                 $target = New-Object System.IO.FileStream("\\.\PhysicalDrive$TargetDiskNumber", [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
                 $openTargetError = $null
@@ -730,6 +873,8 @@ function Write-ImageToDisk {
             }
 
             if ($attempt -lt 3) {
+                Release-TargetVolumeLocks -Handles $volumeLocks
+                $volumeLocks = @()
                 Prepare-TargetDiskForRawWrite -TargetDiskNumber $TargetDiskNumber
                 if (-not $diskWasOffline -and -not $diskOfflinedForWrite) {
                     $diskOfflinedForWrite = Set-TargetDiskOfflineState -TargetDiskNumber $TargetDiskNumber -IsOffline $true
@@ -776,6 +921,7 @@ function Write-ImageToDisk {
     finally {
         if ($target) { $target.Dispose() }
         if ($source) { $source.Dispose() }
+        Release-TargetVolumeLocks -Handles $volumeLocks
 
         if ($diskOfflinedForWrite) {
             $null = Set-TargetDiskOfflineState -TargetDiskNumber $TargetDiskNumber -IsOffline $false
