@@ -40,8 +40,9 @@ Start from an SD card you are willing to erase and an official Pi-Star image dow
 2. Download the official Pi-Star `.zip` or extract the `.img` file
 3. Extract the full HolyConnect package
 4. Recommended: place the Pi-Star `.zip` or `.img` into `holyconnect/pistar-image/`
-5. Double-click `FlashPiStarSD.bat`
-6. The helper auto-detects the Pi-Star `.zip` or `.img`, auto-selects the only safe USB/SD target when there is just one, writes the image to the card, and prepares the first HolyConnect boot automatically
+5. Simplest path: double-click `HolyConnect-Run-First.bat`
+6. The launcher auto-detects whether the inserted card already has Pi-Star on it. If yes, it opens `PreparePiStarSD.bat`. If not, it opens `FlashPiStarSD.bat`.
+7. The helper auto-detects the Pi-Star `.zip` or `.img`, auto-selects the only safe USB/SD target when there is just one, writes the image to the card, and prepares the first HolyConnect boot automatically
 
 Windows should ask for administrator rights when the launcher starts.
 
@@ -58,8 +59,9 @@ On that first boot, the Pi runs the installer locally, applies the permanent USB
 If the SD card was already flashed with Pi-Star and you only need to add the HolyConnect bootstrap:
 
 1. Insert the already-flashed Pi-Star SD card into your Windows PC
-2. Double-click `PreparePiStarSD.bat`
-3. The helper auto-detects the Pi-Star boot partition, copies `install.sh`, and patches the boot files for first boot
+2. Simplest path: double-click `HolyConnect-Run-First.bat`
+3. It should detect the mounted Pi-Star boot partition automatically and open `PreparePiStarSD.bat`
+4. The helper auto-detects the Pi-Star boot partition, copies `install.sh`, and patches the boot files for first boot
 
 No manual `cmdline.txt` editing is needed in the common case.
 
@@ -96,6 +98,8 @@ That's it!
 ```
 holyconnect/
 ├── START-HERE.txt         # Short first-use guide for extracted ZIP users
+├── HolyConnect-Run-First.bat  # One-click first-time launcher for non-technical users
+├── HolyConnect-Run-First.ps1  # Auto-detects whether to flash or just prepare the SD card
 ├── FlashPiStarSD.bat      # One-click flasher for an official Pi-Star image plus HolyConnect bootstrap
 ├── FlashPiStarSD.ps1      # SD flashing script
 ├── pistar-image/          # Recommended folder for the official Pi-Star .zip or .img download
@@ -124,6 +128,7 @@ holyconnect/
 | **MS OS Descriptors** | Windows recognizes Pi as RNDIS device automatically |
 | **One-click SD flash** | `FlashPiStarSD.bat` writes an official Pi-Star image to the SD card and prepares it for HolyConnect |
 | **One-click SD prep** | `PreparePiStarSD.bat` prepares a clean Pi-Star boot partition from Windows before first boot |
+| **One-click first-time launcher** | `HolyConnect-Run-First.bat` decides automatically whether to run the flasher or the SD prep helper |
 | **DHCP fallback** | Pi tries DHCP first, falls back to static 192.168.7.2 |
 | **Persistent logs** | Saves detailed USB / driver / adapter / NAT diagnostics to `windows/logs/*.log` with safe local fallbacks |
 | **Support bundle** | Failures auto-export a diagnostics package, and `HolyConnect.ps1 -ExportDiagnostics` generates one on demand |

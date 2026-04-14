@@ -55,6 +55,7 @@ if ($Lang -eq 'pt') {
     $T.ImagePrompt          = 'Indica o caminho para o ficheiro .zip ou .img oficial do Pi-Star'
     $T.ImageInvalid         = 'Imagem Pi-Star invalida ou inexistente (.zip ou .img): {0}'
     $T.ImageFound           = 'Imagem selecionada: {0}'
+    $T.ImageAutoSelected    = 'Foi encontrada a mesma imagem Pi-Star em varios formatos. Vai ser usada automaticamente: {0}'
     $T.MultipleImages       = 'Foram encontrados varios ficheiros Pi-Star (.zip/.img):'
     $T.ChooseImage          = 'Escolhe o numero da imagem a usar'
     $T.NoImages             = 'Nenhum ficheiro Pi-Star (.zip/.img) foi encontrado automaticamente ao lado do HolyConnect ou na pasta acima.'
@@ -110,6 +111,7 @@ if ($Lang -eq 'pt') {
     $T.ImagePrompt          = 'Enter the path to the official Pi-Star .zip or .img file'
     $T.ImageInvalid         = 'Invalid or missing Pi-Star image (.zip or .img): {0}'
     $T.ImageFound           = 'Selected image: {0}'
+    $T.ImageAutoSelected    = 'The same Pi-Star image was found in multiple formats. It will be used automatically: {0}'
     $T.MultipleImages       = 'Multiple Pi-Star files (.zip/.img) were found:'
     $T.ChooseImage          = 'Choose the number of the image to use'
     $T.NoImages             = 'No Pi-Star file (.zip/.img) was found automatically next to HolyConnect or in the parent folder.'
@@ -365,6 +367,53 @@ function Get-ImageCandidates {
     return @($paths)
 }
 
+function Get-ImageReleaseKey {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $null
+    }
+
+    return [System.IO.Path]::GetFileNameWithoutExtension($Path).ToLowerInvariant()
+}
+
+function Get-ImageCandidateScore {
+    param([string]$Path)
+
+    $score = 0
+    $extension = [System.IO.Path]::GetExtension($Path)
+    if ($extension -ieq '.img') {
+        $score += 100
+    } elseif ($extension -ieq '.zip') {
+        $score += 10
+    }
+
+    if ($Path.StartsWith((Join-Path $PreferredImageRoot 'extracted'), [System.StringComparison]::OrdinalIgnoreCase)) {
+        $score += 300
+    } elseif ($Path.StartsWith($PreferredImageRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $score += 200
+    }
+
+    return $score
+}
+
+function Resolve-AutoImageCandidate {
+    param([string[]]$Candidates)
+
+    if (-not $Candidates -or $Candidates.Count -lt 2) {
+        return $null
+    }
+
+    $groups = @($Candidates | Group-Object { Get-ImageReleaseKey -Path $_ })
+    if ($groups.Count -ne 1) {
+        return $null
+    }
+
+    return ($groups[0].Group |
+        Sort-Object @{ Expression = { Get-ImageCandidateScore -Path $_ }; Descending = $true }, @{ Expression = { $_ } } |
+        Select-Object -First 1)
+}
+
 function Resolve-ImageFile {
     param([string]$SourcePath)
 
@@ -419,6 +468,12 @@ function Resolve-ImagePath {
     $candidates = Get-ImageCandidates
     if ($candidates.Count -eq 1) {
         return Resolve-ImageFile -SourcePath $candidates[0]
+    }
+
+    $autoCandidate = Resolve-AutoImageCandidate -Candidates $candidates
+    if ($autoCandidate) {
+        Write-Info ($T.ImageAutoSelected -f $autoCandidate)
+        return Resolve-ImageFile -SourcePath $autoCandidate
     }
 
     if ($candidates.Count -gt 1) {
@@ -510,7 +565,11 @@ function Resolve-TargetDisk {
 
 function Confirm-DestructiveWrite {
     $confirmation = Read-Host "$($T.ConfirmErase)"
-    if ($confirmation -cne 'YES') {
+    if ([string]::IsNullOrWhiteSpace($confirmation)) {
+        throw $T.Cancelled
+    }
+
+    if (-not (Test-YesAnswer $confirmation) -and $confirmation.Trim().ToUpperInvariant() -ne 'YES') {
         throw $T.Cancelled
     }
 }
