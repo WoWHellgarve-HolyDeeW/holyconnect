@@ -1,0 +1,29 @@
+HOLYCONNECT - START HERE
+
+For a new SD card:
+1. Put the official Pi-Star .zip or .img in pistar-image\
+2. Insert the SD card into the Windows PC
+3. Double-click FlashPiStarSD.bat
+4. Put the SD card into the Pi and boot once
+5. After the automatic reboot, use windows\HolyConnect.bat
+
+If the SD card already has Pi-Star on it:
+1. Insert the SD card into the Windows PC
+2. Double-click PreparePiStarSD.bat
+3. Put the SD card into the Pi and boot once
+4. After the automatic reboot, use windows\HolyConnect.bat
+
+PT:
+
+Para um SD novo:
+1. Mete o .zip ou .img oficial do Pi-Star em pistar-image\
+2. Liga o SD ao PC Windows
+3. Faz duplo-clique em FlashPiStarSD.bat
+4. Mete o SD no Pi e arranca uma vez
+5. Depois do reboot automatico, usa windows\HolyConnect.bat
+
+Se o SD ja tiver Pi-Star gravado:
+1. Liga o SD ao PC Windows
+2. Faz duplo-clique em PreparePiStarSD.bat
+3. Mete o SD no Pi e arranca uma vez
+4. Depois do reboot automatico, usa windows\HolyConnect.bat

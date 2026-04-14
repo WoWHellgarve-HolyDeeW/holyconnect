@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    HolyConnect v1.0.4 - Pi-Star USB Tethering for Windows
+    HolyConnect v1.0.5 - Pi-Star USB Tethering for Windows
 .DESCRIPTION
     Automatically connects to a Pi-Star MMDVM hotspot via USB cable.
     Detects Pi, installs RNDIS driver if needed, configures networking,
@@ -37,7 +37,7 @@ param(
 
 $ErrorActionPreference = "Continue"
 $Host.UI.RawUI.WindowTitle = "HolyConnect"
-$HOLYCONNECT_VERSION = "1.0.4"
+$HOLYCONNECT_VERSION = "1.0.5"
 $HOLYCONNECT_HOST_IP = "192.168.7.1"
 $HOLYCONNECT_PI_IP = "192.168.7.2"
 $HOLYCONNECT_NAT_PREFIX = "192.168.7.0/24"
@@ -68,6 +68,7 @@ if ($Lang -eq 'pt') {
     $T.Waiting           = "Aguardando"
     $T.NotDetected       = "Pi nao detetado apos {0} segundos."
     $T.CheckCable        = "Verifica cabo USB e porta (DATA, nao PWR)"
+    $T.PrepareSdHint     = "Se o cartao SD ainda estiver stock, usa FlashPiStarSD.bat ou PreparePiStarSD.bat uma vez antes de usar o HolyConnect."
     $T.Detected          = "Detetado"
     $T.AlreadyConnected  = "Ja ligado"
     $T.Step2             = "A verificar driver de rede RNDIS..."
@@ -142,6 +143,7 @@ if ($Lang -eq 'pt') {
     $T.Waiting           = "Waiting"
     $T.NotDetected       = "Pi not detected after {0} seconds."
     $T.CheckCable        = "Check USB cable and port (DATA, not PWR)"
+    $T.PrepareSdHint     = "If the SD card is still stock, use FlashPiStarSD.bat or PreparePiStarSD.bat once before using HolyConnect."
     $T.Detected          = "Detected"
     $T.AlreadyConnected  = "Already connected"
     $T.Step2             = "Checking RNDIS network driver..."
@@ -851,6 +853,7 @@ if ($rndis -or $piPnp) {
         Write-DiagnosticSnapshot "Step 1 failure: Pi USB device not detected"
         Write-Fail ($T.NotDetected -f $maxWait)
         Write-Info $T.CheckCable
+        Write-Info $T.PrepareSdHint
         Exit-HolyConnect 1 "Pi USB device not detected"
     }
     if ($rndis) { Write-OK "$($T.Detected): $($rndis.InterfaceDescription)" }

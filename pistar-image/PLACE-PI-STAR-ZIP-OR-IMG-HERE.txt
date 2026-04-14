@@ -1,0 +1,12 @@
+Put the official Pi-Star .zip or .img file in this folder.
+
+Recommended flow:
+1. Put the Pi-Star download here.
+2. Insert the SD card into the Windows PC.
+3. Run FlashPiStarSD.bat.
+
+The flasher will also look one folder above HolyConnect and can open a file picker if needed.
+
+Optional:
+- If you want first-boot Wi-Fi preloaded too, place your own wpa_supplicant.conf in this folder.
+- The prep helper will copy it to the Pi-Star boot partition.

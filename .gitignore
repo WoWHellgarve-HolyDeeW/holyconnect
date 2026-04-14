@@ -1,3 +1,8 @@
 holyconnect_last_ip.txt
 windows/diagnostics/
 *.log
+pistar-image/*.zip
+pistar-image/*.img
+pistar-image/*.md5sum
+pistar-image/extracted/
+pistar-image/wpa_supplicant.conf

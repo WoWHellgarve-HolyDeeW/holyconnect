@@ -1,11 +1,11 @@
 @echo off
-:: HolyConnect - Pi-Star USB Tethering
+:: HolyConnect - Prepare a clean Pi-Star SD card for first boot
 :: Double-click to run. Auto-elevates to Administrator.
 :: https://github.com/WoWHellgarve-HolyDeeW/holyconnect
 
 setlocal
 set "PS_EXE=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
-set "TARGET_PS1=%~dp0HolyConnect.ps1"
+set "TARGET_PS1=%~dp0PreparePiStarSD.ps1"
 cd /d "%~dp0"
 
 "%PS_EXE%" -NoProfile -Command "$p = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent()); if ($p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { exit 0 } else { exit 1 }"

@@ -19,7 +19,7 @@ HolyConnect turns the Pi Zero W's USB port into a virtual network adapter using 
 - **Windows auto-detects it** as a network adapter (no manual driver install on most PCs)
 - **Stable 192.168.7.x link** between Pi and PC
 - **Internet sharing via NAT** — Pi-Star can reach DMR/YSF/D-Star reflectors through the PC's internet
-- **Designed for most Windows 10/11 PCs and laptops** — just copy 2 files and double-click
+- **Built for Windows 10/11 PCs and laptops** — after one-time SD flash/prep, normal use is just USB cable plus double-click
 
 ## How It Works
 
@@ -32,7 +32,47 @@ HolyConnect turns the Pi Zero W's USB port into a virtual network adapter using 
 
 ## Quick Start
 
-### Step 1: Install on Pi (one time)
+### Step 1: Flash and prepare the SD card on Windows (recommended, one time)
+
+Start from an SD card you are willing to erase and an official Pi-Star image downloaded from [pistar.uk](https://www.pistar.uk/downloads/).
+
+1. Insert the SD card into your Windows PC
+2. Download the official Pi-Star `.zip` or extract the `.img` file
+3. Extract the full HolyConnect package
+4. Recommended: place the Pi-Star `.zip` or `.img` into `holyconnect/pistar-image/`
+5. Double-click `FlashPiStarSD.bat`
+6. The helper auto-detects the Pi-Star `.zip` or `.img`, auto-selects the only safe USB/SD target when there is just one, writes the image to the card, and prepares the first HolyConnect boot automatically
+
+Windows should ask for administrator rights when the launcher starts.
+
+Optional: the flasher can ask for Wi-Fi details and generate `wpa_supplicant.conf` automatically during the flash. If you prefer, you can still place your own `wpa_supplicant.conf` in `holyconnect/pistar-image/`. A template is included as `wpa_supplicant.example.conf`.
+
+### Step 2: First boot on the Pi (one time)
+
+Put the prepared SD card back into the Pi and power it on once.
+
+On that first boot, the Pi runs the installer locally, applies the permanent USB gadget setup, and reboots automatically.
+
+### Alternative if the card already has a clean Pi-Star image
+
+If the SD card was already flashed with Pi-Star and you only need to add the HolyConnect bootstrap:
+
+1. Insert the already-flashed Pi-Star SD card into your Windows PC
+2. Double-click `PreparePiStarSD.bat`
+3. The helper auto-detects the Pi-Star boot partition, copies `install.sh`, and patches the boot files for first boot
+
+No manual `cmdline.txt` editing is needed in the common case.
+
+### Step 3: Connect to Windows (normal use)
+
+After the first-boot prep is done, daily use is simple:
+
+1. Copy the `windows/` folder to the target PC (or USB stick)
+2. Connect Pi to PC via **USB cable** (use the **DATA** port on Pi, not PWR)
+3. Double-click **`HolyConnect.bat`**
+4. The script does everything automatically and opens the Pi-Star dashboard
+
+### Advanced fallback: manual Pi-side install
 
 Copy `pi-setup/install.sh` to the Pi-Star SD card's `/boot` partition, then boot with:
 
@@ -49,19 +89,19 @@ sudo bash /boot/install.sh
 
 The Pi will reboot automatically after installation.
 
-### Step 2: Connect to Windows
-
-1. Copy the `windows/` folder to the target PC (or USB stick)
-2. Connect Pi to PC via **USB cable** (use the **DATA** port on Pi, not PWR)
-3. Double-click **`HolyConnect.bat`**
-4. The script does everything automatically and opens the Pi-Star dashboard
-
 That's it!
 
-## What's in the Box
+## Project Layout
 
 ```
 holyconnect/
+├── START-HERE.txt         # Short first-use guide for extracted ZIP users
+├── FlashPiStarSD.bat      # One-click flasher for an official Pi-Star image plus HolyConnect bootstrap
+├── FlashPiStarSD.ps1      # SD flashing script
+├── pistar-image/          # Recommended folder for the official Pi-Star .zip or .img download
+│   └── wpa_supplicant.example.conf  # Optional Wi-Fi template for first boot
+├── PreparePiStarSD.bat     # One-click SD bootstrap helper for clean Pi-Star cards
+├── PreparePiStarSD.ps1     # SD preparation script
 ├── pi-setup/
 │   └── install.sh          # One-time Pi-side installer
 ├── windows/
@@ -82,6 +122,8 @@ holyconnect/
 | **Bilingual** | Auto-detects system language (English / Portuguese) |
 | **No dependencies** | Uses only built-in Windows tools (PowerShell 5.1+) |
 | **MS OS Descriptors** | Windows recognizes Pi as RNDIS device automatically |
+| **One-click SD flash** | `FlashPiStarSD.bat` writes an official Pi-Star image to the SD card and prepares it for HolyConnect |
+| **One-click SD prep** | `PreparePiStarSD.bat` prepares a clean Pi-Star boot partition from Windows before first boot |
 | **DHCP fallback** | Pi tries DHCP first, falls back to static 192.168.7.2 |
 | **Persistent logs** | Saves detailed USB / driver / adapter / NAT diagnostics to `windows/logs/*.log` with safe local fallbacks |
 | **Support bundle** | Failures auto-export a diagnostics package, and `HolyConnect.ps1 -ExportDiagnostics` generates one on demand |
@@ -137,6 +179,21 @@ A: No problem. NAT adapts automatically. The Pi↔PC link is always 192.168.7.x.
 
 **Q: Does this modify Pi-Star?**
 A: It only adds a USB gadget service and network config. Pi-Star itself is untouched.
+
+**Q: Do I need to edit cmdline.txt manually?**
+A: No in the normal flow. Use `PreparePiStarSD.bat` on a clean Pi-Star SD card from Windows. Manual `cmdline.txt` editing is only the fallback path.
+
+**Q: Do I start from an empty SD card?**
+A: If you use `FlashPiStarSD.bat`, yes: start from a card you are willing to erase plus an official Pi-Star `.zip` or `.img` download. That helper writes the Pi-Star image first, then adds the HolyConnect first-boot bootstrap. `PreparePiStarSD.bat` is for cards that already have a clean Pi-Star image on them.
+
+**Q: Where do I put the Pi-Star download?**
+A: The recommended place is `holyconnect/pistar-image/`. `FlashPiStarSD.bat` also looks next to the HolyConnect folder and one folder above it, and if it still does not find the file it opens a file picker or asks for the path.
+
+**Q: Can HolyConnect preload Wi-Fi too?**
+A: Yes. The normal flow can ask for Wi-Fi details during the flash and generate `wpa_supplicant.conf` automatically for that run. If you prefer, you can also place `holyconnect/pistar-image/wpa_supplicant.conf` manually. This is optional and not required for HolyConnect USB mode.
+
+**Q: Can HolyConnect prepare a stock Pi-Star over USB with only HolyConnect.bat?**
+A: No. A stock Pi-Star must be prepared once from the SD card or via SSH first, because the USB gadget does not exist yet.
 
 **Q: First time on a new PC — do I need to install drivers manually?**
 A: Usually no. The MS OS Descriptors make Windows auto-detect it. HolyConnect now also tries every built-in Windows RNDIS INF it can find before falling back to the guided one-time manual install.
