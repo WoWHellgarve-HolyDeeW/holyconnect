@@ -298,10 +298,50 @@ function Add-UniquePath {
     }
 }
 
+function Normalize-SearchRoot {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $null
+    }
+
+    $candidate = $Path.Trim()
+    if ($candidate -match '^[A-Za-z]$') {
+        $candidate = '{0}:\' -f $candidate
+    } elseif ($candidate -match '^[A-Za-z]:$') {
+        $candidate = '{0}\' -f $candidate
+    }
+
+    return $candidate
+}
+
+function Get-SafeSearchRoots {
+    $roots = [System.Collections.Generic.List[string]]::new()
+    $rawRoots = @($PreferredImageRoot, $PSScriptRoot, (Split-Path $PSScriptRoot -Parent)) | Where-Object { $_ }
+
+    foreach ($rawRoot in $rawRoots) {
+        $candidate = Normalize-SearchRoot -Path $rawRoot
+        if (-not $candidate) { continue }
+
+        try {
+            if (-not (Test-Path -LiteralPath $candidate)) {
+                continue
+            }
+
+            $resolved = (Resolve-Path -LiteralPath $candidate -ErrorAction Stop).Path
+            Add-UniquePath -List $roots -Path $resolved
+        } catch {
+            continue
+        }
+    }
+
+    return @($roots)
+}
+
 function Get-ImageCandidates {
     $paths = [System.Collections.Generic.List[string]]::new()
 
-    $searchRoots = @($PreferredImageRoot, $PSScriptRoot, (Split-Path $PSScriptRoot -Parent)) | Where-Object { $_ } | Select-Object -Unique
+    $searchRoots = Get-SafeSearchRoots
     foreach ($root in $searchRoots) {
         foreach ($pattern in @('Pi-Star*.img', 'Pi-Star*.zip')) {
             Get-ChildItem -LiteralPath $root -Filter $pattern -File -ErrorAction SilentlyContinue |
@@ -309,6 +349,7 @@ function Get-ImageCandidates {
         }
 
         Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like 'Pi-Star*' } |
             ForEach-Object {
                 foreach ($pattern in @('Pi-Star*.img', 'Pi-Star*.zip')) {
                     Get-ChildItem -LiteralPath $_.FullName -Filter $pattern -File -ErrorAction SilentlyContinue |
@@ -398,6 +439,10 @@ function Resolve-ImagePath {
     }
 
     $manualPath = Read-Host "$($T.ImagePrompt)"
+    if ([string]::IsNullOrWhiteSpace($manualPath)) {
+        throw $T.Cancelled
+    }
+
     if (-not (Test-Path -LiteralPath $manualPath)) {
         throw ($T.ImageInvalid -f $manualPath)
     }
