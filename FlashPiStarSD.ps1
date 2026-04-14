@@ -608,6 +608,9 @@ function Set-TargetDiskOfflineState {
         [bool]$IsOffline
     )
 
+    $diskPartExe = Join-Path $env:SystemRoot 'System32\diskpart.exe'
+    $diskPartScriptPath = $null
+
     try {
         Set-Disk -Number $TargetDiskNumber -IsOffline $IsOffline -ErrorAction Stop
         try {
@@ -615,7 +618,68 @@ function Set-TargetDiskOfflineState {
         } catch {}
         return $true
     } catch {
-        return $false
+        if (-not (Test-Path -LiteralPath $diskPartExe)) {
+            return $false
+        }
+
+        $diskPartScriptPath = Join-Path $env:TEMP ('holyconnect_diskpart_{0}.txt' -f ([Guid]::NewGuid().ToString('N')))
+        $diskPartAction = if ($IsOffline) { 'offline disk' } else { 'online disk' }
+
+        try {
+            Set-Content -Path $diskPartScriptPath -Value @(
+                ('select disk {0}' -f $TargetDiskNumber),
+                $diskPartAction
+            ) -Encoding ASCII
+
+            & $diskPartExe /s $diskPartScriptPath | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                return $false
+            }
+
+            try {
+                Update-HostStorageCache
+            } catch {}
+            return $true
+        } catch {
+            return $false
+        } finally {
+            if ($diskPartScriptPath -and (Test-Path -LiteralPath $diskPartScriptPath)) {
+                Remove-Item -LiteralPath $diskPartScriptPath -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
+
+function Clear-TargetDiskReadOnly {
+    param([int]$TargetDiskNumber)
+
+    $diskPartExe = Join-Path $env:SystemRoot 'System32\diskpart.exe'
+    $diskPartScriptPath = $null
+
+    try {
+        Set-Disk -Number $TargetDiskNumber -IsReadOnly $false -ErrorAction Stop
+        return $true
+    } catch {
+        if (-not (Test-Path -LiteralPath $diskPartExe)) {
+            return $false
+        }
+
+        $diskPartScriptPath = Join-Path $env:TEMP ('holyconnect_diskpart_{0}.txt' -f ([Guid]::NewGuid().ToString('N')))
+        try {
+            Set-Content -Path $diskPartScriptPath -Value @(
+                ('select disk {0}' -f $TargetDiskNumber),
+                'attributes disk clear readonly'
+            ) -Encoding ASCII
+
+            & $diskPartExe /s $diskPartScriptPath | Out-Null
+            return ($LASTEXITCODE -eq 0)
+        } catch {
+            return $false
+        } finally {
+            if ($diskPartScriptPath -and (Test-Path -LiteralPath $diskPartScriptPath)) {
+                Remove-Item -LiteralPath $diskPartScriptPath -Force -ErrorAction SilentlyContinue
+            }
+        }
     }
 }
 
@@ -627,9 +691,7 @@ function Write-ImageToDisk {
 
     $disk = Get-Disk -Number $TargetDiskNumber -ErrorAction Stop
     if ($disk.IsReadOnly) {
-        try {
-            Set-Disk -Number $TargetDiskNumber -IsReadOnly $false -ErrorAction Stop
-        } catch {}
+        $null = Clear-TargetDiskReadOnly -TargetDiskNumber $TargetDiskNumber
     }
 
     Prepare-TargetDiskForRawWrite -TargetDiskNumber $TargetDiskNumber
@@ -651,6 +713,7 @@ function Write-ImageToDisk {
             try {
                 $target = New-Object System.IO.FileStream("\\.\PhysicalDrive$TargetDiskNumber", [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
                 $openTargetError = $null
+                $writeDenied = $false
                 break
             }
             catch [System.UnauthorizedAccessException] {
