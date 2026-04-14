@@ -47,6 +47,7 @@ if ($Lang -eq 'pt') {
     $T.ConfigPatched     = 'config.txt atualizado com dtoverlay=dwc2'
     $T.WifiConfigCopied  = 'wpa_supplicant.conf opcional copiado para a particao boot'
     $T.WifiConfigSkipped = 'Sem wpa_supplicant.conf opcional. O HolyConnect por USB continua a funcionar normalmente.'
+    $T.Cancelled         = 'Operacao cancelada pelo utilizador.'
     $T.Prepared          = 'Cartao preparado para o primeiro arranque do HolyConnect.'
     $T.NextStep1         = 'Proximo passo: coloca o cartao no Pi e arranca uma vez.'
     $T.NextStep2         = 'O primeiro boot corre o instalador, reinicia sozinho, e depois podes usar HolyConnect.bat.'
@@ -68,6 +69,7 @@ if ($Lang -eq 'pt') {
     $T.ConfigPatched     = 'config.txt updated with dtoverlay=dwc2'
     $T.WifiConfigCopied  = 'Optional wpa_supplicant.conf copied to the boot partition'
     $T.WifiConfigSkipped = 'No optional wpa_supplicant.conf found. HolyConnect over USB still works normally.'
+    $T.Cancelled         = 'Operation cancelled by user.'
     $T.Prepared          = 'SD card prepared for HolyConnect first boot.'
     $T.NextStep1         = 'Next step: put the card into the Pi and boot once.'
     $T.NextStep2         = 'The first boot runs the installer, reboots automatically, and then you can use HolyConnect.bat.'
@@ -104,6 +106,25 @@ function Test-PiStarBootPath {
     return (Test-Path -LiteralPath (Join-Path $Path 'overlays'))
 }
 
+function Normalize-BootPath {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $null
+    }
+
+    $candidate = $Path.Trim()
+    if ($candidate -match '^[A-Za-z]$') {
+        return '{0}:\' -f $candidate
+    }
+
+    if ($candidate -match '^[A-Za-z]:$') {
+        return '{0}\' -f $candidate
+    }
+
+    return $candidate
+}
+
 function Get-BootCandidates {
     $candidates = foreach ($drive in Get-PSDrive -PSProvider FileSystem) {
         if (-not (Test-PiStarBootPath -Path $drive.Root)) { continue }
@@ -129,10 +150,11 @@ function Resolve-BootPartition {
     param([string]$RequestedPath)
 
     if ($RequestedPath) {
-        if (-not (Test-PiStarBootPath -Path $RequestedPath)) {
+        $normalizedRequestedPath = Normalize-BootPath -Path $RequestedPath
+        if (-not (Test-PiStarBootPath -Path $normalizedRequestedPath)) {
             throw ($T.InvalidBootPath -f $RequestedPath)
         }
-        return (Resolve-Path -LiteralPath $RequestedPath).Path
+        return (Resolve-Path -LiteralPath $normalizedRequestedPath).Path
     }
 
     $candidates = Get-BootCandidates
@@ -159,6 +181,11 @@ function Resolve-BootPartition {
 
     Write-Info $T.NoBootAuto
     $manualPath = Read-Host "$($T.EnterBootPath)"
+    if ([string]::IsNullOrWhiteSpace($manualPath)) {
+        throw $T.Cancelled
+    }
+
+    $manualPath = Normalize-BootPath -Path $manualPath
     if (-not (Test-PiStarBootPath -Path $manualPath)) {
         throw ($T.InvalidBootPath -f $manualPath)
     }
