@@ -39,7 +39,7 @@ Parte de um cartao SD que possa ser apagado e de uma imagem oficial do Pi-Star d
 3. Extrai o pacote completo do HolyConnect
 4. Recomendado: mete o `.zip` ou `.img` do Pi-Star em `holyconnect/pistar-image/`
 5. Forma mais simples: faz duplo-clique em `HolyConnect-Run-First.bat`
-6. O launcher deteta sozinho se o cartao inserido ja tem Pi-Star. Se sim, abre o `PreparePiStarSD.bat`. Se nao, abre o `FlashPiStarSD.bat`.
+6. O launcher deteta sozinho se o cartao inserido ja tem Pi-Star, mesmo que o Windows ainda nao lhe tenha dado letra a particao boot. Se sim, abre o `PreparePiStarSD.bat`. Se nao, abre o `FlashPiStarSD.bat`.
 7. O helper deteta automaticamente o `.zip` ou `.img`, escolhe sozinho o unico destino USB/SD seguro quando so houver um, grava a imagem no cartao e prepara o primeiro arranque do HolyConnect
 
 O Windows deve pedir privilegios de administrador quando o launcher arranca.

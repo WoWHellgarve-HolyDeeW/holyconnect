@@ -41,7 +41,7 @@ Start from an SD card you are willing to erase and an official Pi-Star image dow
 3. Extract the full HolyConnect package
 4. Recommended: place the Pi-Star `.zip` or `.img` into `holyconnect/pistar-image/`
 5. Simplest path: double-click `HolyConnect-Run-First.bat`
-6. The launcher auto-detects whether the inserted card already has Pi-Star on it. If yes, it opens `PreparePiStarSD.bat`. If not, it opens `FlashPiStarSD.bat`.
+6. The launcher auto-detects whether the inserted card already has Pi-Star on it, even if Windows has not assigned a drive letter to the boot partition yet. If yes, it opens `PreparePiStarSD.bat`. If not, it opens `FlashPiStarSD.bat`.
 7. The helper auto-detects the Pi-Star `.zip` or `.img`, auto-selects the only safe USB/SD target when there is just one, writes the image to the card, and prepares the first HolyConnect boot automatically
 
 Windows should ask for administrator rights when the launcher starts.

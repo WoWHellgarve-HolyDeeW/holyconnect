@@ -61,13 +61,81 @@ function Test-PiStarBootPath {
 }
 
 function Get-BootCandidates {
-    return @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue |
-        Where-Object { Test-PiStarBootPath -Path $_.Root } |
-        Sort-Object Root)
+    $candidates = New-Object System.Collections.Generic.List[object]
+    $seenRoots = @{}
+
+    foreach ($drive in @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue | Sort-Object Root)) {
+        if (-not (Test-PiStarBootPath -Path $drive.Root)) { continue }
+        if ($seenRoots.ContainsKey($drive.Root)) { continue }
+
+        $candidates.Add([pscustomobject]@{
+            Root = $drive.Root
+            DiskNumber = $null
+            PartitionNumber = $null
+        })
+        $seenRoots[$drive.Root] = $true
+    }
+
+    $disks = @(Get-Disk -ErrorAction SilentlyContinue | Where-Object {
+        $_.Number -ne 0 -and
+        -not $_.IsBoot -and
+        -not $_.IsSystem
+    })
+
+    foreach ($disk in $disks) {
+        $partitions = @(Get-Partition -DiskNumber $disk.Number -ErrorAction SilentlyContinue | Sort-Object PartitionNumber)
+        foreach ($partition in $partitions) {
+            if ([string]$partition.Type -match '^Unknown$|Reserved') {
+                continue
+            }
+
+            $driveLetter = $partition.DriveLetter
+            $assignedTemporarily = $false
+            if (-not $driveLetter) {
+                try {
+                    Add-PartitionAccessPath -DiskNumber $disk.Number -PartitionNumber $partition.PartitionNumber -AssignDriveLetter -ErrorAction Stop
+                    $assignedTemporarily = $true
+                } catch {}
+
+                try {
+                    $partition = Get-Partition -DiskNumber $disk.Number -PartitionNumber $partition.PartitionNumber -ErrorAction Stop
+                    $driveLetter = $partition.DriveLetter
+                } catch {}
+            }
+
+            if (-not $driveLetter) {
+                continue
+            }
+
+            $root = '{0}:\' -f $driveLetter
+            if (Test-PiStarBootPath -Path $root) {
+                if (-not $seenRoots.ContainsKey($root)) {
+                    $candidates.Add([pscustomobject]@{
+                        Root = $root
+                        DiskNumber = $disk.Number
+                        PartitionNumber = $partition.PartitionNumber
+                    })
+                    $seenRoots[$root] = $true
+                }
+                continue
+            }
+
+            if ($assignedTemporarily) {
+                try {
+                    Remove-PartitionAccessPath -DiskNumber $disk.Number -PartitionNumber $partition.PartitionNumber -AccessPath $root -ErrorAction Stop
+                } catch {}
+            }
+        }
+    }
+
+    return @($candidates | Sort-Object Root)
 }
 
 function Invoke-HolyConnectScript {
-    param([string]$ScriptPath)
+    param(
+        [string]$ScriptPath,
+        [string[]]$ExtraArguments
+    )
 
     $arguments = [System.Collections.Generic.List[string]]::new()
     $arguments.Add('-NoProfile')
@@ -83,6 +151,12 @@ function Invoke-HolyConnectScript {
     if ($Lang) {
         $arguments.Add('-Lang')
         $arguments.Add($Lang)
+    }
+
+    foreach ($argument in @($ExtraArguments)) {
+        if (-not [string]::IsNullOrWhiteSpace($argument)) {
+            $arguments.Add($argument)
+        }
     }
 
     & $PowerShellExe @arguments
@@ -108,7 +182,11 @@ try {
     $bootCandidates = Get-BootCandidates
     if ($bootCandidates.Count -gt 0) {
         Write-Info $T.RunPrep
-        Invoke-HolyConnectScript -ScriptPath $PrepareScriptPath
+        $extraArguments = @()
+        if ($bootCandidates.Count -eq 1) {
+            $extraArguments = @('-BootPath', $bootCandidates[0].Root)
+        }
+        Invoke-HolyConnectScript -ScriptPath $PrepareScriptPath -ExtraArguments $extraArguments
     }
 
     Write-Info $T.RunFlash
