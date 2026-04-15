@@ -126,13 +126,16 @@ if ($Lang -eq 'pt') {
     $T.BootWait             = 'A aguardar que o Windows monte a particao boot do Pi-Star...'
     $T.BootReady            = 'Particao boot pronta: {0}'
     $T.WifiExisting         = 'Foi encontrado pistar-image\wpa_supplicant.conf. Essa configuracao Wi-Fi vai ser usada.'
-    $T.WifiOffer            = 'Queres deixar o Wi-Fi preconfigurado no SD agora? [S/N]'
+    $T.WifiUsageIntro       = 'Configuracao opcional de Wi-Fi para uso futuro:'
+    $T.WifiUsageUsb         = 'Se vais usar HolyConnect com PC/portatil por USB, podes saltar o Wi-Fi agora.'
+    $T.WifiUsageMobile      = 'Se vais usar dongle Wi-Fi + hotspot do telemovel no carro/standalone, configura o Wi-Fi agora.'
+    $T.WifiOffer            = 'Queres preconfigurar o Wi-Fi agora para uso standalone/movel? [S/N]'
     $T.WifiCountryPrompt    = 'Pais Wi-Fi (Enter para {0})'
     $T.WifiSsidPrompt       = 'Nome da rede Wi-Fi (SSID)'
     $T.WifiPasswordPrompt   = 'Password Wi-Fi'
     $T.WifiHiddenPrompt     = 'Rede oculta? [s/N]'
     $T.WifiGenerated        = 'Configuracao Wi-Fi gerada automaticamente para este flash.'
-    $T.WifiSkipped          = 'Wi-Fi nao configurado neste flash. O modo USB HolyConnect continua a funcionar.'
+    $T.WifiSkipped          = 'Wi-Fi nao configurado neste flash. O uso por USB com HolyConnect num PC/portatil continua a funcionar.'
     $T.WifiInvalid          = 'SSID e password Wi-Fi nao podem ficar vazios.'
     $T.Prepared             = 'Cartao SD pronto para o primeiro arranque do HolyConnect.'
     $T.NextStep1            = 'Coloca o cartao no Pi e arranca uma vez.'
@@ -182,13 +185,16 @@ if ($Lang -eq 'pt') {
     $T.BootWait             = 'Waiting for Windows to mount the Pi-Star boot partition...'
     $T.BootReady            = 'Boot partition ready: {0}'
     $T.WifiExisting         = 'Found pistar-image\wpa_supplicant.conf. That Wi-Fi config will be used.'
-    $T.WifiOffer            = 'Do you want Wi-Fi preconfigured on the SD now? [Y/N]'
+    $T.WifiUsageIntro       = 'Optional Wi-Fi setup for later use:'
+    $T.WifiUsageUsb         = 'If you will use HolyConnect with a PC/laptop over USB, you can skip Wi-Fi now.'
+    $T.WifiUsageMobile      = 'If you will use a Wi-Fi dongle + phone hotspot in a car/standalone setup, configure Wi-Fi now.'
+    $T.WifiOffer            = 'Do you want Wi-Fi preconfigured now for standalone/mobile use? [Y/N]'
     $T.WifiCountryPrompt    = 'Wi-Fi country code (Enter for {0})'
     $T.WifiSsidPrompt       = 'Wi-Fi network name (SSID)'
     $T.WifiPasswordPrompt   = 'Wi-Fi password'
     $T.WifiHiddenPrompt     = 'Hidden network? [y/N]'
     $T.WifiGenerated        = 'Wi-Fi configuration generated automatically for this flash.'
-    $T.WifiSkipped          = 'Wi-Fi was not configured in this flash. HolyConnect USB mode still works.'
+    $T.WifiSkipped          = 'Wi-Fi was not configured in this flash. HolyConnect over USB with a PC/laptop still works.'
     $T.WifiInvalid          = 'Wi-Fi SSID and password cannot be empty.'
     $T.Prepared             = 'SD card ready for HolyConnect first boot.'
     $T.NextStep1            = 'Put the card into the Pi and boot once.'
@@ -283,6 +289,9 @@ function Resolve-WifiConfigPath {
         return $null
     }
 
+    Write-Info $T.WifiUsageIntro
+    Write-Info $T.WifiUsageUsb
+    Write-Info $T.WifiUsageMobile
     $answer = Read-Host "$($T.WifiOffer)"
     if (-not (Test-YesAnswer $answer)) {
         Write-Info $T.WifiSkipped
@@ -1029,6 +1038,8 @@ try {
     Write-OK ($T.TargetDisk -f $selectedDisk.Number, $selectedDisk.FriendlyName, [math]::Round($selectedDisk.Size / 1GB, 2))
     Confirm-DestructiveWrite
 
+    $resolvedWifiConfigPath = Resolve-WifiConfigPath
+
     Write-Step $T.Step3
     Write-ImageToDisk -ResolvedImagePath $resolvedImagePath -TargetDiskNumber $selectedDisk.Number
     Write-OK $T.WriteDone
@@ -1036,7 +1047,6 @@ try {
     Write-Step $T.Step4
     $bootRoot = Wait-BootPartitionRoot -TargetDiskNumber $selectedDisk.Number
     Write-OK ($T.BootReady -f $bootRoot)
-    $resolvedWifiConfigPath = Resolve-WifiConfigPath
     & $PrepareScriptPath -BootPath $bootRoot -WifiConfigPath $resolvedWifiConfigPath -NoPause -Lang $Lang
 
     Write-Host ''

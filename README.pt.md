@@ -44,7 +44,7 @@ Parte de um cartao SD que possa ser apagado e de uma imagem oficial do Pi-Star d
 
 O Windows deve pedir privilegios de administrador quando o launcher arranca.
 
-Opcional: o flasher pode pedir os dados do Wi-Fi e gerar o `wpa_supplicant.conf` automaticamente durante a gravacao. Se preferires, tambem podes meter o teu `wpa_supplicant.conf` em `holyconnect/pistar-image/`. Vai incluido um template em `wpa_supplicant.example.conf`.
+Opcional: o flasher explica logo a diferenca entre uso por USB com PC/portatil e uso standalone/movel com dongle Wi-Fi + hotspot do telemovel, e pode pedir os dados do Wi-Fi antes de gravar. Se preferires, tambem podes meter o teu `wpa_supplicant.conf` em `holyconnect/pistar-image/`. Vai incluido um template em `wpa_supplicant.example.conf`.
 
 ### Passo 2: Primeiro arranque no Pi (uma vez)
 

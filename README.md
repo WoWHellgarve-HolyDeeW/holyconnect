@@ -46,7 +46,7 @@ Start from an SD card you are willing to erase and an official Pi-Star image dow
 
 Windows should ask for administrator rights when the launcher starts.
 
-Optional: the flasher can ask for Wi-Fi details and generate `wpa_supplicant.conf` automatically during the flash. If you prefer, you can still place your own `wpa_supplicant.conf` in `holyconnect/pistar-image/`. A template is included as `wpa_supplicant.example.conf`.
+Optional: the flasher now explains the difference between USB use with a PC/laptop and standalone/mobile use with a Wi-Fi dongle + phone hotspot, and can ask for the Wi-Fi details before the long write starts. If you prefer, you can still place your own `wpa_supplicant.conf` in `holyconnect/pistar-image/`. A template is included as `wpa_supplicant.example.conf`.
 
 ### Step 2: First boot on the Pi (one time)
 
