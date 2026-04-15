@@ -168,6 +168,7 @@ Estas linhas sao expectativas operacionais, nao promessas cegas. Nos dongles USB
 
 | Familia de dongle | Estado | Notas |
 |-------------------|--------|-------|
+| SMC Networks SMCWUSBS-N3 (EZ Connect N 150Mbps Wireless USB) | Confirmado a funcionar | O teste standalone funcionou neste setup e o Pi entrou automaticamente numa rede Wi-Fi configurada |
 | Dongles 2.4 GHz baseados em MT7601U | Bom candidato | Melhor primeira escolha para uso standalone/movel; ainda assim testa o modelo exato |
 | Dongles 2.4 GHz baseados em RTL8188EU / RTL8188FTV | Misto | Muitas vezes funcionam, mas as revisoes variam muito entre vendedores |
 | Nano dongles dual-band desconhecidos | Risco alto | Evita salvo se ja estiverem validados em Pi-Star; 5 GHz e especialmente inconsistente |
@@ -194,6 +195,9 @@ R: A pasta recomendada e `holyconnect/pistar-image/`. O `FlashPiStarSD.bat` tamb
 
 **P: O HolyConnect tambem pode deixar o Wi-Fi preconfigurado?**
 R: Sim. No fluxo normal, o flasher pode pedir os dados do Wi-Fi durante a gravacao, permitir adicionar varias redes e gerar o `wpa_supplicant.conf` automaticamente para esse run. O user mete a rede em texto normal e o HolyConnect deriva o `psk` WPA automaticamente quando prepara o SD. Se preferires, tambem podes colocar `holyconnect/pistar-image/wpa_supplicant.conf` manualmente com varios blocos `network={...}`. Isto e opcional e nao e necessario para o modo USB do HolyConnect.
+
+**P: Depois liga-se sozinho ao hotspot do telemovel?**
+R: Sim, desde que o SSID e a password desse hotspot ja estejam no `wpa_supplicant.conf`. O Pi-Star tenta automaticamente as redes conhecidas quando elas aparecem. Se estiver visivel mais do que uma rede conhecida, ganha a entrada com `priority=` mais alta.
 
 **P: O HolyConnect consegue preparar um Pi-Star stock via USB so com o HolyConnect.bat?**
 R: Nao. Um Pi-Star stock tem de ser preparado uma vez pelo cartao SD ou por SSH primeiro, porque o USB gadget ainda nao existe nesse estado inicial.
