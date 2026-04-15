@@ -46,7 +46,7 @@ Start from an SD card you are willing to erase and an official Pi-Star image dow
 
 Windows should ask for administrator rights when the launcher starts.
 
-Optional: the flasher now explains the difference between USB use with a PC/laptop and standalone/mobile use with a Wi-Fi dongle + phone hotspot, and can ask for the Wi-Fi details before the long write starts. The user still types a normal SSID and password; HolyConnect automatically derives the WPA `psk` when it generates or copies `wpa_supplicant.conf` onto the SD card. If you prefer, you can still place your own `wpa_supplicant.conf` in `holyconnect/pistar-image/`. A template is included as `wpa_supplicant.example.conf`.
+Optional: the flasher now explains the difference between USB use with a PC/laptop and standalone/mobile use with a Wi-Fi dongle + phone hotspot, can ask for the Wi-Fi details before the long write starts, and now lets the user add multiple Wi-Fi networks in one setup. The user still types a normal SSID and password; HolyConnect automatically derives the WPA `psk` when it generates or copies `wpa_supplicant.conf` onto the SD card. If you prefer, you can still place your own `wpa_supplicant.conf` in `holyconnect/pistar-image/`. A template is included as `wpa_supplicant.example.conf`.
 
 ### Step 2: First boot on the Pi (one time)
 
@@ -195,7 +195,7 @@ A: If you use `FlashPiStarSD.bat`, yes: start from a card you are willing to era
 A: The recommended place is `holyconnect/pistar-image/`. `FlashPiStarSD.bat` also looks next to the HolyConnect folder and one folder above it, and if it still does not find the file it opens a file picker or asks for the path.
 
 **Q: Can HolyConnect preload Wi-Fi too?**
-A: Yes. The normal flow can ask for Wi-Fi details during the flash and generate `wpa_supplicant.conf` automatically for that run. The user enters normal Wi-Fi details and HolyConnect automatically derives the WPA `psk` when preparing the SD. If you prefer, you can also place `holyconnect/pistar-image/wpa_supplicant.conf` manually. This is optional and not required for HolyConnect USB mode.
+A: Yes. The normal flow can ask for Wi-Fi details during the flash, let the user add multiple networks, and generate `wpa_supplicant.conf` automatically for that run. The user enters normal Wi-Fi details and HolyConnect automatically derives the WPA `psk` when preparing the SD. If you prefer, you can also place `holyconnect/pistar-image/wpa_supplicant.conf` manually with multiple `network={...}` blocks. This is optional and not required for HolyConnect USB mode.
 
 **Q: Can HolyConnect prepare a stock Pi-Star over USB with only HolyConnect.bat?**
 A: No. A stock Pi-Star must be prepared once from the SD card or via SSH first, because the USB gadget does not exist yet.

@@ -134,6 +134,7 @@ if ($Lang -eq 'pt') {
     $T.WifiSsidPrompt       = 'Nome da rede Wi-Fi (SSID)'
     $T.WifiPasswordPrompt   = 'Password Wi-Fi'
     $T.WifiHiddenPrompt     = 'Rede oculta? [s/N]'
+    $T.WifiAnotherPrompt    = 'Queres adicionar outra rede Wi-Fi? [S/N]'
     $T.WifiGenerated        = 'Configuracao Wi-Fi gerada automaticamente para este flash.'
     $T.WifiSkipped          = 'Wi-Fi nao configurado neste flash. O uso por USB com HolyConnect num PC/portatil continua a funcionar.'
     $T.WifiInvalid          = 'SSID e password Wi-Fi nao podem ficar vazios.'
@@ -193,6 +194,7 @@ if ($Lang -eq 'pt') {
     $T.WifiSsidPrompt       = 'Wi-Fi network name (SSID)'
     $T.WifiPasswordPrompt   = 'Wi-Fi password'
     $T.WifiHiddenPrompt     = 'Hidden network? [y/N]'
+    $T.WifiAnotherPrompt    = 'Do you want to add another Wi-Fi network? [Y/N]'
     $T.WifiGenerated        = 'Wi-Fi configuration generated automatically for this flash.'
     $T.WifiSkipped          = 'Wi-Fi was not configured in this flash. HolyConnect over USB with a PC/laptop still works.'
     $T.WifiInvalid          = 'Wi-Fi SSID and password cannot be empty.'
@@ -255,12 +257,70 @@ function Get-WifiPskHash {
     }
 }
 
+function New-WifiNetworkDefinition {
+    param(
+        [string]$SSID,
+        [string]$Password,
+        [bool]$Hidden,
+        [int]$Priority
+    )
+
+    return [pscustomobject]@{
+        SSID = $SSID
+        Password = $Password
+        Hidden = $Hidden
+        Priority = $Priority
+    }
+}
+
+function New-WifiNetworkBlock {
+    param([psobject]$Network)
+
+    $scanValue = if ($Network.Hidden) { '1' } else { '0' }
+    $pskHash = Get-WifiPskHash -SsidBytes ([System.Text.Encoding]::UTF8.GetBytes($Network.SSID)) -Password $Network.Password
+
+    return @(
+        'network={'
+        "    ssid=`"$($Network.SSID)`""
+        "    psk=$pskHash"
+        "    priority=$($Network.Priority)"
+        "    scan_ssid=$scanValue"
+        '}'
+    )
+}
+
+function Read-WifiNetworkDefinitions {
+    param([string]$Country)
+
+    $networks = New-Object System.Collections.Generic.List[object]
+    $priority = 100
+
+    while ($true) {
+        $ssid = Read-Host "$($T.WifiSsidPrompt)"
+        $securePassword = Read-Host "$($T.WifiPasswordPrompt)" -AsSecureString
+        $password = ConvertTo-PlainText -SecureString $securePassword
+        if ([string]::IsNullOrWhiteSpace($ssid) -or [string]::IsNullOrWhiteSpace($password)) {
+            throw $T.WifiInvalid
+        }
+
+        $hiddenAnswer = Read-Host "$($T.WifiHiddenPrompt)"
+        $hidden = Test-YesAnswer $hiddenAnswer
+        $networks.Add((New-WifiNetworkDefinition -SSID $ssid.Trim() -Password $password -Hidden $hidden -Priority $priority))
+        $priority -= 10
+
+        $anotherAnswer = Read-Host "$($T.WifiAnotherPrompt)"
+        if (-not (Test-YesAnswer $anotherAnswer)) {
+            break
+        }
+    }
+
+    return @($networks)
+}
+
 function New-WifiConfigFile {
     param(
         [string]$Country,
-        [string]$SSID,
-        [string]$Password,
-        [bool]$Hidden
+        [object[]]$Networks
     )
 
     $tempDir = Join-Path $env:TEMP 'HolyConnect'
@@ -269,21 +329,28 @@ function New-WifiConfigFile {
     }
 
     $path = Join-Path $tempDir ('wpa_supplicant_{0}.conf' -f ([Guid]::NewGuid().ToString('N').Substring(0, 8)))
-    $scanValue = if ($Hidden) { '1' } else { '0' }
-    $pskHash = Get-WifiPskHash -SsidBytes ([System.Text.Encoding]::UTF8.GetBytes($SSID)) -Password $Password
-    $content = @(
+    $content = New-Object System.Collections.Generic.List[string]
+    foreach ($line in @(
         "country=$Country"
         'ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev'
         'update_config=1'
         ''
-        'network={'
-        "    ssid=`"$SSID`""
-        "    psk=$pskHash"
-        "    scan_ssid=$scanValue"
-        '}'
-    )
+    )) {
+        $content.Add($line)
+    }
 
-    Set-Content -Path $path -Value $content -Encoding ASCII
+    foreach ($network in @($Networks)) {
+        foreach ($line in (New-WifiNetworkBlock -Network $network)) {
+            $content.Add($line)
+        }
+        $content.Add('')
+    }
+
+    while ($content.Count -gt 0 -and [string]::IsNullOrWhiteSpace($content[$content.Count - 1])) {
+        $content.RemoveAt($content.Count - 1)
+    }
+
+    Set-Content -Path $path -Value @($content) -Encoding ASCII
     $script:GeneratedWifiConfigPath = $path
     return $path
 }
@@ -296,7 +363,10 @@ function Resolve-WifiConfigPath {
 
     if ($WifiSSID -and $WifiPassword) {
         $country = if ($WifiCountry) { $WifiCountry.ToUpperInvariant() } else { Get-DefaultWifiCountry }
-        $path = New-WifiConfigFile -Country $country -SSID $WifiSSID -Password $WifiPassword -Hidden ([bool]$WifiHidden)
+        $networks = @(
+            New-WifiNetworkDefinition -SSID $WifiSSID.Trim() -Password $WifiPassword -Hidden ([bool]$WifiHidden) -Priority 100
+        )
+        $path = New-WifiConfigFile -Country $country -Networks $networks
         Write-OK $T.WifiGenerated
         return $path
     }
@@ -318,16 +388,8 @@ function Resolve-WifiConfigPath {
     $defaultCountry = if ($WifiCountry) { $WifiCountry.ToUpperInvariant() } else { Get-DefaultWifiCountry }
     $enteredCountry = Read-Host ($T.WifiCountryPrompt -f $defaultCountry)
     $country = if ([string]::IsNullOrWhiteSpace($enteredCountry)) { $defaultCountry } else { $enteredCountry.Trim().ToUpperInvariant() }
-    $ssid = Read-Host "$($T.WifiSsidPrompt)"
-    $securePassword = Read-Host "$($T.WifiPasswordPrompt)" -AsSecureString
-    $password = ConvertTo-PlainText -SecureString $securePassword
-    if ([string]::IsNullOrWhiteSpace($ssid) -or [string]::IsNullOrWhiteSpace($password)) {
-        throw $T.WifiInvalid
-    }
-
-    $hiddenAnswer = Read-Host "$($T.WifiHiddenPrompt)"
-    $hidden = Test-YesAnswer $hiddenAnswer
-    $path = New-WifiConfigFile -Country $country -SSID $ssid.Trim() -Password $password -Hidden $hidden
+    $networks = Read-WifiNetworkDefinitions -Country $country
+    $path = New-WifiConfigFile -Country $country -Networks $networks
     Write-OK $T.WifiGenerated
     return $path
 }
