@@ -44,7 +44,7 @@ Parte de um cartao SD que possa ser apagado e de uma imagem oficial do Pi-Star d
 
 O Windows deve pedir privilegios de administrador quando o launcher arranca.
 
-Opcional: o flasher explica logo a diferenca entre uso por USB com PC/portatil e uso standalone/movel com dongle Wi-Fi + hotspot do telemovel, e pode pedir os dados do Wi-Fi antes de gravar. Se preferires, tambem podes meter o teu `wpa_supplicant.conf` em `holyconnect/pistar-image/`. Vai incluido um template em `wpa_supplicant.example.conf`.
+Opcional: o flasher explica logo a diferenca entre uso por USB com PC/portatil e uso standalone/movel com dongle Wi-Fi + hotspot do telemovel, e pode pedir os dados do Wi-Fi antes de gravar. O user continua a meter SSID e password em texto normal; o HolyConnect deriva automaticamente o `psk` WPA quando gera ou copia o `wpa_supplicant.conf` para o SD. Se preferires, tambem podes meter o teu `wpa_supplicant.conf` em `holyconnect/pistar-image/`. Vai incluido um template em `wpa_supplicant.example.conf`.
 
 ### Passo 2: Primeiro arranque no Pi (uma vez)
 
@@ -193,7 +193,7 @@ R: Se usares `FlashPiStarSD.bat`, sim: comecas com um cartao que pode ser apagad
 R: A pasta recomendada e `holyconnect/pistar-image/`. O `FlashPiStarSD.bat` tambem procura ao lado da pasta HolyConnect e uma pasta acima. Se ainda assim nao encontrar, abre um seletor de ficheiro ou pede o caminho.
 
 **P: O HolyConnect tambem pode deixar o Wi-Fi preconfigurado?**
-R: Sim. No fluxo normal, o flasher pode pedir os dados do Wi-Fi durante a gravacao e gerar o `wpa_supplicant.conf` automaticamente para esse run. Se preferires, tambem podes colocar `holyconnect/pistar-image/wpa_supplicant.conf` manualmente. Isto e opcional e nao e necessario para o modo USB do HolyConnect.
+R: Sim. No fluxo normal, o flasher pode pedir os dados do Wi-Fi durante a gravacao e gerar o `wpa_supplicant.conf` automaticamente para esse run. O user mete a rede em texto normal e o HolyConnect deriva o `psk` WPA automaticamente quando prepara o SD. Se preferires, tambem podes colocar `holyconnect/pistar-image/wpa_supplicant.conf` manualmente. Isto e opcional e nao e necessario para o modo USB do HolyConnect.
 
 **P: O HolyConnect consegue preparar um Pi-Star stock via USB so com o HolyConnect.bat?**
 R: Nao. Um Pi-Star stock tem de ser preparado uma vez pelo cartao SD ou por SSH primeiro, porque o USB gadget ainda nao existe nesse estado inicial.

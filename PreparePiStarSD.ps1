@@ -91,6 +91,77 @@ function Set-AsciiContent {
     [System.IO.File]::WriteAllText($Path, $Content, $encoding)
 }
 
+function Convert-HexStringToBytes {
+    param([string]$HexValue)
+
+    if ([string]::IsNullOrWhiteSpace($HexValue) -or ($HexValue.Length % 2) -ne 0) {
+        return $null
+    }
+
+    $bytes = New-Object byte[] ($HexValue.Length / 2)
+    for ($index = 0; $index -lt $HexValue.Length; $index += 2) {
+        $bytes[$index / 2] = [Convert]::ToByte($HexValue.Substring($index, 2), 16)
+    }
+
+    return $bytes
+}
+
+function Get-WifiPskHash {
+    param(
+        [byte[]]$SsidBytes,
+        [string]$Password
+    )
+
+    $passwordBytes = [System.Text.Encoding]::UTF8.GetBytes($Password)
+    $derive = New-Object System.Security.Cryptography.Rfc2898DeriveBytes($passwordBytes, $SsidBytes, 4096)
+    try {
+        return ([BitConverter]::ToString($derive.GetBytes(32))).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $derive.Dispose()
+    }
+}
+
+function Convert-WifiConfigContent {
+    param([string]$Content)
+
+    return [regex]::Replace($Content, '(?ms)network=\{.*?^\s*\}', {
+        param($match)
+
+        $block = $match.Value
+        $ssidBytes = $null
+
+        $ssidQuotedMatch = [regex]::Match($block, '(?m)^\s*ssid="(?<value>[^"]*)"\s*$')
+        if ($ssidQuotedMatch.Success) {
+            $ssidBytes = [System.Text.Encoding]::UTF8.GetBytes($ssidQuotedMatch.Groups['value'].Value)
+        } else {
+            $ssidHexMatch = [regex]::Match($block, '(?m)^\s*ssid=(?<value>[0-9A-Fa-f]+)\s*$')
+            if ($ssidHexMatch.Success) {
+                $ssidBytes = Convert-HexStringToBytes -HexValue $ssidHexMatch.Groups['value'].Value
+            }
+        }
+
+        if (-not $ssidBytes) {
+            return $block
+        }
+
+        $pskQuotedMatch = [regex]::Match($block, '(?m)^(?<indent>\s*)psk="(?<value>[^"]*)"\s*$')
+        if (-not $pskQuotedMatch.Success) {
+            return $block
+        }
+
+        $plainPassword = $pskQuotedMatch.Groups['value'].Value
+        if ([string]::IsNullOrWhiteSpace($plainPassword)) {
+            return $block
+        }
+
+        $hashedPassword = Get-WifiPskHash -SsidBytes $ssidBytes -Password $plainPassword
+        $replacement = '{0}psk={1}' -f $pskQuotedMatch.Groups['indent'].Value, $hashedPassword
+
+        return $block.Substring(0, $pskQuotedMatch.Index) + $replacement + $block.Substring($pskQuotedMatch.Index + $pskQuotedMatch.Length)
+    })
+}
+
 function Test-PiStarBootPath {
     param([string]$Path)
 
@@ -269,7 +340,9 @@ function Copy-OptionalWifiConfig {
         Backup-FileIfNeeded -Path $targetPath
     }
 
-    Copy-Item -LiteralPath $ResolvedWifiConfigPath -Destination $targetPath -Force
+    $rawContent = Get-Content -LiteralPath $ResolvedWifiConfigPath -Raw
+    $normalizedContent = Convert-WifiConfigContent -Content $rawContent
+    Set-AsciiContent -Path $targetPath -Content $normalizedContent
     Write-OK $T.WifiConfigCopied
 }
 

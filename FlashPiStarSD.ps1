@@ -239,6 +239,22 @@ function ConvertTo-PlainText {
     }
 }
 
+function Get-WifiPskHash {
+    param(
+        [byte[]]$SsidBytes,
+        [string]$Password
+    )
+
+    $passwordBytes = [System.Text.Encoding]::UTF8.GetBytes($Password)
+    $derive = New-Object System.Security.Cryptography.Rfc2898DeriveBytes($passwordBytes, $SsidBytes, 4096)
+    try {
+        return ([BitConverter]::ToString($derive.GetBytes(32))).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $derive.Dispose()
+    }
+}
+
 function New-WifiConfigFile {
     param(
         [string]$Country,
@@ -254,6 +270,7 @@ function New-WifiConfigFile {
 
     $path = Join-Path $tempDir ('wpa_supplicant_{0}.conf' -f ([Guid]::NewGuid().ToString('N').Substring(0, 8)))
     $scanValue = if ($Hidden) { '1' } else { '0' }
+    $pskHash = Get-WifiPskHash -SsidBytes ([System.Text.Encoding]::UTF8.GetBytes($SSID)) -Password $Password
     $content = @(
         "country=$Country"
         'ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev'
@@ -261,7 +278,7 @@ function New-WifiConfigFile {
         ''
         'network={'
         "    ssid=`"$SSID`""
-        "    psk=`"$Password`""
+        "    psk=$pskHash"
         "    scan_ssid=$scanValue"
         '}'
     )
