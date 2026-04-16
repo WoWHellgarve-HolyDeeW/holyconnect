@@ -1,35 +1,39 @@
 HOLYCONNECT - START HERE
 
-Simplest path: double-click HolyConnect-Run-First.bat and click Yes if Windows asks for administrator rights.
-The launcher auto-detects whether the SD card already has Pi-Star on it and opens the right helper.
+Most users only need 2 files:
+1. HolyConnect-Run-First.bat
+   Use once per SD card on a Windows PC before the first real Pi boot.
+2. HolyConnect.bat
+   Use for normal day-to-day USB access after the first-time setup is done.
 
-For a new SD card:
+Ignore the advanced\ folder unless you want manual control or the README explicitly tells you to use an advanced fallback.
+
+Normal flow:
 1. Put the official Pi-Star .zip or .img in pistar-image\
 2. Insert the SD card into the Windows PC
-3. Double-click HolyConnect-Run-First.bat
+3. Run HolyConnect-Run-First.bat
 4. Put the SD card into the Pi and boot once
-5. After the automatic reboot, use windows\HolyConnect.bat
+5. After the automatic reboot, connect the Pi to the PC by the USB DATA port
+6. Run HolyConnect.bat
 
-If the SD card already has Pi-Star on it:
-1. Insert the SD card into the Windows PC
-2. Double-click HolyConnect-Run-First.bat
-3. Put the SD card into the Pi and boot once
-4. After the automatic reboot, use windows\HolyConnect.bat
+If you later copy only the windows\ folder to another PC, use windows\HolyConnect.bat on that PC.
 
 PT:
 
-Forma mais simples: faz duplo-clique em HolyConnect-Run-First.bat e clica Sim se o Windows pedir permissoes de administrador.
-O launcher deteta sozinho se o SD ja tem Pi-Star e abre o helper certo.
+A maioria dos utilizadores so precisa de 2 ficheiros:
+1. HolyConnect-Run-First.bat
+   Usa uma vez por cartao SD num PC Windows antes do primeiro arranque real do Pi.
+2. HolyConnect.bat
+   Usa no dia a dia para acesso por USB depois da preparacao inicial.
 
-Para um SD novo:
+Ignora a pasta advanced\ a nao ser que queiras controlo manual ou que o README te mande usar um fallback avancado.
+
+Fluxo normal:
 1. Mete o .zip ou .img oficial do Pi-Star em pistar-image\
-2. Liga o SD ao PC Windows
-3. Faz duplo-clique em HolyConnect-Run-First.bat
-4. Mete o SD no Pi e arranca uma vez
-5. Depois do reboot automatico, usa windows\HolyConnect.bat
+2. Liga o cartao SD ao PC Windows
+3. Corre HolyConnect-Run-First.bat
+4. Mete o cartao no Pi e arranca uma vez
+5. Depois do reboot automatico, liga o Pi ao PC pela porta USB DATA
+6. Corre HolyConnect.bat
 
-Se o SD ja tiver Pi-Star gravado:
-1. Liga o SD ao PC Windows
-2. Faz duplo-clique em HolyConnect-Run-First.bat
-3. Mete o SD no Pi e arranca uma vez
-4. Depois do reboot automatico, usa windows\HolyConnect.bat
+Se mais tarde copiares so a pasta windows\ para outro PC, usa windows\HolyConnect.bat nesse PC.
