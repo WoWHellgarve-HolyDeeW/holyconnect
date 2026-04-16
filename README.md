@@ -175,6 +175,10 @@ These are operating expectations, not blanket guarantees. On USB Wi-Fi dongles, 
 | RTL8188EU / RTL8188FTV-class 2.4 GHz dongles | Mixed | Often workable, but revisions vary a lot between sellers |
 | Unknown dual-band nano dongles | High risk | Avoid unless already verified on Pi-Star; 5 GHz support is especially inconsistent |
 
+### Standalone Diagnostics
+
+After HolyConnect is installed on the Pi, each boot writes `/boot/holyconnect_standalone_status.txt` to the SD boot partition. Use it when standalone/mobile hotspot mode joins Wi-Fi but the dashboard is still not reachable. It records the Wi-Fi interface, MAC, SSID, IPv4, gateway, and the state of `ssh` and `lighttpd`.
+
 ## FAQ
 
 **Q: Do I need a laptop to use my hotspot in the car?**
@@ -200,6 +204,9 @@ A: Yes. The normal flow can ask for Wi-Fi details during the flash, let the user
 
 **Q: Will it connect automatically to a phone hotspot later?**
 A: Yes, if that hotspot SSID and password are already present in `wpa_supplicant.conf`. Pi-Star will automatically try known Wi-Fi networks when they are visible. If more than one known network is available, the highest `priority=` entry wins.
+
+**Q: How do I diagnose standalone/mobile mode if the hotspot does not open the dashboard?**
+A: Open `/boot/holyconnect_standalone_status.txt` from the SD card. That file shows the Wi-Fi interface, MAC, connected SSID, Wi-Fi IP, gateway, and the state of `ssh`, `lighttpd`, and the USB gadget service. If the phone that provides the hotspot can open the dashboard but another device cannot, that is usually hotspot client isolation rather than a HolyConnect fault.
 
 **Q: Can HolyConnect prepare a stock Pi-Star over USB with only HolyConnect.bat?**
 A: No. A stock Pi-Star must be prepared once from the SD card or via SSH first, because the USB gadget does not exist yet.

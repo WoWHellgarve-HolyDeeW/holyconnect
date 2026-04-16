@@ -173,6 +173,10 @@ Estas linhas sao expectativas operacionais, nao promessas cegas. Nos dongles USB
 | Dongles 2.4 GHz baseados em RTL8188EU / RTL8188FTV | Misto | Muitas vezes funcionam, mas as revisoes variam muito entre vendedores |
 | Nano dongles dual-band desconhecidos | Risco alto | Evita salvo se ja estiverem validados em Pi-Star; 5 GHz e especialmente inconsistente |
 
+### Diagnostico Standalone
+
+Depois da instalacao do HolyConnect no Pi, cada arranque gera `/boot/holyconnect_standalone_status.txt` na particao boot do cartao SD. Serve para os casos em que o modo standalone/mobile entra no Wi-Fi mas o painel continua sem abrir. O ficheiro regista o interface Wi-Fi, MAC, SSID, IPv4, gateway, e o estado de `ssh` e `lighttpd`.
+
 ## FAQ
 
 **P: Preciso de portatil para usar o hotspot no carro?**
@@ -198,6 +202,9 @@ R: Sim. No fluxo normal, o flasher pode pedir os dados do Wi-Fi durante a gravac
 
 **P: Depois liga-se sozinho ao hotspot do telemovel?**
 R: Sim, desde que o SSID e a password desse hotspot ja estejam no `wpa_supplicant.conf`. O Pi-Star tenta automaticamente as redes conhecidas quando elas aparecem. Se estiver visivel mais do que uma rede conhecida, ganha a entrada com `priority=` mais alta.
+
+**P: Como diagnostico o modo standalone se o hotspot nao abrir o painel?**
+R: Abre o ficheiro `/boot/holyconnect_standalone_status.txt` no cartao SD. Esse ficheiro mostra o interface Wi-Fi, MAC, SSID ligado, IP Wi-Fi, gateway, e o estado de `ssh`, `lighttpd` e do servico USB gadget. Se o telemovel que fornece o hotspot abrir o painel mas outro equipamento nao abrir, normalmente o problema e isolamento de clientes no hotspot, nao falha do HolyConnect.
 
 **P: O HolyConnect consegue preparar um Pi-Star stock via USB so com o HolyConnect.bat?**
 R: Nao. Um Pi-Star stock tem de ser preparado uma vez pelo cartao SD ou por SSH primeiro, porque o USB gadget ainda nao existe nesse estado inicial.

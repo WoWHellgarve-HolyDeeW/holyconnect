@@ -14,7 +14,8 @@
 #    2. Creates systemd service to start gadget at boot
 #    3. Configures usb0 network (DHCP with static fallback)
 #    4. Enables SSH
-#    5. Reboots
+#    5. Writes a standalone status snapshot to /boot on every boot
+#    6. Reboots
 #
 #  COMPATIBLE WITH:
 #    - Pi-Star 4.x on Raspberry Pi Zero W / Zero 2 W
@@ -27,6 +28,9 @@ export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 HOLYCONNECT_VERSION="1.0.5"
 GADGET_SCRIPT="/usr/local/bin/usb-gadget.sh"
 GADGET_SERVICE="/etc/systemd/system/usb-gadget.service"
+STATUS_SCRIPT="/usr/local/bin/holyconnect-standalone-status.sh"
+STATUS_SERVICE="/etc/systemd/system/holyconnect-standalone-status.service"
+STATUS_FILE="/boot/holyconnect_standalone_status.txt"
 LOG="/boot/holyconnect_install.log"
 
 # Redirect output to log
@@ -67,14 +71,14 @@ sleep 5
 # ============================================
 #  1. REMOUNT FILESYSTEMS READ-WRITE
 # ============================================
-echo "[1/8] Mounting filesystems read-write..."
+echo "[1/9] Mounting filesystems read-write..."
 mount -o remount,rw / 2>/dev/null || true
 mount -o remount,rw /boot 2>/dev/null || true
 
 # ============================================
 #  2. UPDATE CMDLINE.TXT
 # ============================================
-echo "[2/8] Updating /boot/cmdline.txt..."
+echo "[2/9] Updating /boot/cmdline.txt..."
 CMDLINE=$(cat /boot/cmdline.txt)
 
 # Remove old systemd.run params (leftover from boot-time install)
@@ -100,7 +104,7 @@ fi
 # ============================================
 #  3. CREATE USB GADGET SCRIPT
 # ============================================
-echo "[3/8] Creating USB gadget script..."
+echo "[3/9] Creating USB gadget script..."
 cat > "$GADGET_SCRIPT" << 'GADGETEOF'
 #!/bin/bash
 # HolyConnect - USB RNDIS Gadget with Microsoft OS Descriptors
@@ -180,7 +184,7 @@ echo "  Created: $GADGET_SCRIPT"
 # ============================================
 #  4. CREATE SYSTEMD SERVICE
 # ============================================
-echo "[4/8] Creating systemd service..."
+echo "[4/9] Creating systemd service..."
 cat > "$GADGET_SERVICE" << 'SVCEOF'
 [Unit]
 Description=HolyConnect USB RNDIS Gadget
@@ -204,7 +208,7 @@ echo "  Service enabled"
 # ============================================
 #  5. CONFIGURE NETWORK (DHCP + STATIC FALLBACK)
 # ============================================
-echo "[5/8] Configuring usb0 network..."
+echo "[5/9] Configuring usb0 network..."
 
 # Remove any old usb0 config from dhcpcd.conf (handles re-runs cleanly)
 sed -i '/# HolyConnect/,/^$/d' /etc/dhcpcd.conf 2>/dev/null
@@ -233,22 +237,219 @@ echo "  dhcpcd.conf updated (DHCP + fallback 192.168.7.2)"
 # ============================================
 #  6. ENABLE SSH
 # ============================================
-echo "[6/8] Enabling SSH..."
+echo "[6/9] Enabling SSH..."
 systemctl enable ssh 2>/dev/null || true
 touch /boot/ssh 2>/dev/null || true
 echo "  SSH enabled"
 
 # ============================================
-#  7. UPDATE /ETC/MODULES
+#  7. CREATE STANDALONE STATUS HELPER
 # ============================================
-echo "[7/8] Updating kernel modules..."
+echo "[7/9] Creating standalone status helper..."
+cat > "$STATUS_SCRIPT" << 'STATUSEOF'
+#!/bin/bash
+set +e
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+STATUS_FILE="/boot/holyconnect_standalone_status.txt"
+TMP_FILE="/tmp/holyconnect_standalone_status.txt"
+boot_mount_state="$(awk '$2 == "/boot" { print $4; exit }' /proc/mounts 2>/dev/null)"
+boot_was_mounted=0
+boot_was_rw=0
+boot_target_ready=0
+
+if [ -n "$boot_mount_state" ]; then
+    boot_was_mounted=1
+    case ",$boot_mount_state," in
+        *,rw,*) boot_was_rw=1 ;;
+    esac
+else
+    mount /boot 2>/dev/null || true
+fi
+
+if grep -qs ' /boot ' /proc/mounts; then
+    mount -o remount,rw /boot 2>/dev/null || true
+    if grep -qs ' /boot ' /proc/mounts; then
+        boot_target_ready=1
+    fi
+fi
+
+get_service_state() {
+    local service
+    local state
+
+    for service in "$@"; do
+        state="$(systemctl is-active "$service" 2>/dev/null || true)"
+        if [ -n "$state" ] && [ "$state" != "unknown" ]; then
+            echo "$service ($state)"
+            return
+        fi
+    done
+
+    echo "$1 (unknown)"
+}
+
+detect_wifi_interface() {
+    local iface
+
+    if command -v iw >/dev/null 2>&1; then
+        iface="$(iw dev 2>/dev/null | awk '$1 == "Interface" { print $2; exit }')"
+        if [ -n "$iface" ]; then
+            echo "$iface"
+            return
+        fi
+    fi
+
+    if [ -d /sys/class/net/wlan0 ]; then
+        echo "wlan0"
+        return
+    fi
+
+    iface="$(ip -o link show 2>/dev/null | awk -F': ' '$2 ~ /^wl/ { print $2; exit }')"
+    if [ -n "$iface" ]; then
+        echo "$iface"
+    fi
+}
+
+get_ssid() {
+    local iface="$1"
+    local ssid=""
+
+    if command -v iwgetid >/dev/null 2>&1; then
+        ssid="$(iwgetid "$iface" -r 2>/dev/null)"
+    fi
+
+    if [ -z "$ssid" ] && command -v iw >/dev/null 2>&1; then
+        ssid="$(iw dev "$iface" link 2>/dev/null | awk -F': ' '/SSID/ { print $2; exit }')"
+    fi
+
+    echo "$ssid"
+}
+
+wifi_interface="$(detect_wifi_interface)"
+wifi_mac="not-detected"
+wifi_state="not-detected"
+wifi_ssid="not-connected"
+wifi_ipv4="not-assigned"
+wifi_gateway="not-assigned"
+wifi_signal="unknown"
+
+if [ -n "$wifi_interface" ] && [ -d "/sys/class/net/$wifi_interface" ]; then
+    wifi_mac="$(cat "/sys/class/net/$wifi_interface/address" 2>/dev/null || echo unknown)"
+    wifi_state="$(cat "/sys/class/net/$wifi_interface/operstate" 2>/dev/null || echo unknown)"
+
+    for _attempt in 1 2 3 4 5 6; do
+        wifi_ipv4="$(ip -4 -o addr show dev "$wifi_interface" scope global 2>/dev/null | awk '{ print $4; exit }')"
+        if [ -n "$wifi_ipv4" ]; then
+            break
+        fi
+        sleep 5
+    done
+
+    if [ -z "$wifi_ipv4" ]; then
+        wifi_ipv4="not-assigned"
+    fi
+
+    wifi_ssid="$(get_ssid "$wifi_interface")"
+    if [ -z "$wifi_ssid" ]; then
+        wifi_ssid="not-connected"
+    fi
+
+    wifi_gateway="$(ip route show default dev "$wifi_interface" 2>/dev/null | awk '{ print $3; exit }')"
+    if [ -z "$wifi_gateway" ]; then
+        wifi_gateway="not-assigned"
+    fi
+
+    if command -v iw >/dev/null 2>&1; then
+        wifi_signal="$(iw dev "$wifi_interface" link 2>/dev/null | awk -F': ' '/signal/ { print $2; exit }')"
+        if [ -z "$wifi_signal" ]; then
+            wifi_signal="unknown"
+        fi
+    fi
+fi
+
+hostname_value="$(hostname 2>/dev/null || echo unknown)"
+ssh_state="$(get_service_state ssh sshd)"
+lighttpd_state="$(get_service_state lighttpd)"
+usb_gadget_state="$(get_service_state usb-gadget)"
+dashboard_url="unavailable"
+
+if [ "$wifi_ipv4" != "not-assigned" ]; then
+    dashboard_url="http://${wifi_ipv4%%/*}/"
+fi
+
+{
+    echo "HolyConnect Standalone Status"
+    echo "Generated: $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "Hostname: $hostname_value"
+    echo "Wi-Fi interface: ${wifi_interface:-not-detected}"
+    echo "Wi-Fi MAC: $wifi_mac"
+    echo "Wi-Fi state: $wifi_state"
+    echo "Connected SSID: $wifi_ssid"
+    echo "Wi-Fi IPv4: $wifi_ipv4"
+    echo "Wi-Fi gateway: $wifi_gateway"
+    echo "Wi-Fi signal: $wifi_signal"
+    echo "SSH service: $ssh_state"
+    echo "lighttpd service: $lighttpd_state"
+    echo "USB gadget service: $usb_gadget_state"
+    echo "Standalone dashboard URL: $dashboard_url"
+    echo "USB dashboard URL: http://192.168.7.2/"
+    echo "Install log: /boot/holyconnect_install.log"
+    echo "Note: Some phone hotspots isolate clients. The phone may open the dashboard even when another device cannot."
+} > "$TMP_FILE"
+
+if [ "$boot_target_ready" -eq 1 ]; then
+    if cp "$TMP_FILE" "$STATUS_FILE" 2>/dev/null; then
+        :
+    else
+        cat "$TMP_FILE" > "$STATUS_FILE" 2>/dev/null || true
+    fi
+
+    sync
+
+    if [ "$boot_was_mounted" -eq 1 ]; then
+        if [ "$boot_was_rw" -eq 0 ]; then
+            mount -o remount,ro /boot 2>/dev/null || true
+        fi
+    else
+        umount /boot 2>/dev/null || true
+    fi
+fi
+
+rm -f "$TMP_FILE"
+STATUSEOF
+chmod +x "$STATUS_SCRIPT"
+
+cat > "$STATUS_SERVICE" << 'STATUSSVCEOF'
+[Unit]
+Description=HolyConnect standalone status snapshot
+After=network-online.target lighttpd.service ssh.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/holyconnect-standalone-status.sh
+
+[Install]
+WantedBy=multi-user.target
+STATUSSVCEOF
+
+systemctl daemon-reload
+systemctl enable holyconnect-standalone-status.service
+echo "  Standalone status service enabled"
+echo "  Status file: $STATUS_FILE"
+
+# ============================================
+#  8. UPDATE /ETC/MODULES
+# ============================================
+echo "[8/9] Updating kernel modules..."
 sed -i '/^g_ether$/d' /etc/modules 2>/dev/null
 grep -q "^dwc2$" /etc/modules 2>/dev/null || echo "dwc2" >> /etc/modules
 grep -q "^libcomposite$" /etc/modules 2>/dev/null || echo "libcomposite" >> /etc/modules
 echo "  /etc/modules: dwc2, libcomposite"
 
 # ============================================
-#  8. DONE - REBOOT
+#  9. DONE - REBOOT
 # ============================================
 echo ""
 echo "========================================"
@@ -260,6 +461,7 @@ echo "After reboot:"
 echo "  1. Connect Pi to PC via USB (DATA port)"
 echo "  2. Run HolyConnect.bat on Windows"
 echo "  3. Dashboard: http://192.168.7.2/"
+echo "  4. Standalone status: /boot/holyconnect_standalone_status.txt"
 echo ""
 
 sync
